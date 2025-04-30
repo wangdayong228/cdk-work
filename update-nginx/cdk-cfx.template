@@ -1,0 +1,58 @@
+# l1-rpc
+server {
+    listen 15000;
+
+    location / {
+        proxy_pass {{cdk_l1_rpc}};
+    }
+    
+}
+
+# l2-rpc
+server {
+    listen 15001;
+
+    location / {
+        proxy_pass {{cdk_l2_rpc}};
+    }
+    
+}
+
+# grafana
+server {
+    listen 15100;
+
+    location / {
+        proxy_pass {{cdk_grafana}};
+    }
+
+}
+
+# bridge-ui
+server {
+    listen 15200;
+
+    location / {
+        proxy_pass {{cdk_bridge_ui}};
+    }
+
+}
+
+# bridge-service-rpc
+server {
+    listen 15300;
+
+    location / {
+        proxy_pass {{cdk_bridge_service_rpc}};
+    }
+
+}
+
+# prometheus
+server {
+    listen 15400;
+
+    location / {
+        proxy_pass {{cdk_prometheus}};
+    }
+}
