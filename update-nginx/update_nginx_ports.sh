@@ -25,11 +25,11 @@ template=$(cat "$TEMPLATE_FILE")
 echo "已加载模板文件: $TEMPLATE_FILE"
 
 # 获取 kurtosis 中服务的 HTTP 端口
-L1_RPC_PORT="http://127.0.0.1:3031"
+L1_RPC_PORT="http://127.0.0.1:21000"
 
-if [ "$ENCLAVE_NAME" != "cdk-cfx" ]; then
-    L1_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} cdk-erigon-rpc-001 rpc)
-fi
+# if [ "$ENCLAVE_NAME" != "cdk-cfx" ]; then
+#     L1_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} cdk-erigon-rpc-001 rpc)
+# fi
 
 L2_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} cdk-erigon-rpc-001 rpc)
 BRIDGE_UI_PORT=$(kurtosis port print ${ENCLAVE_NAME} zkevm-bridge-ui-001 web-ui)
