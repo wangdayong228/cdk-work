@@ -4,6 +4,7 @@ server {
 
     location / {
         proxy_pass {{cdk_l1_rpc}};
+        proxy_ssl_server_name on;
     }
     
 }
