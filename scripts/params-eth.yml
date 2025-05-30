@@ -10,8 +10,8 @@ args:
   global_log_level: debug
   use_dynamic_ports: true
 
-  # zkevm_pool_manager_image: pana/zkevm-pool-manager:v0.1.2
-  # cdk_node_image: cdk:latest
+  zkevm_pool_manager_image: zkevm-pool-manager:local
+  cdk_node_image: cdk:latest
 
   additional_services:
     - prometheus_grafana
@@ -28,8 +28,8 @@ args:
   # TODO: Configure the L1 RPC URLs to be valid Sepolia endpoints.
   # l1_rpc_url: https://evmtestnet.confluxrpc.com/3qkzhKJeYP4KNaRJwqynLpH1QD51XpGQZ5H4BmSuVZurqrCxkH6WhsdmvoH7g6jGJqHBeLCtCDkUbXZceECB5GtHyCHANGE_ME
   # l1_rpc_url: https://etest-rpc.nftrainbow.cn/qgxRldOSzM
-  l1_rpc_url: https://opgrafana.conflux123.xyz/rpc
-  l1_ws_url: wss://opgrafana.conflux123.xyz/ws
+  l1_rpc_url: https://op-eth-grafana.yidaiyilu0.site/rpc
+  l1_ws_url: ws://op-eth-grafana.yidaiyilu0.site
 
   l1_deploy_lxly_bridge_and_call: false
   l2_deploy_lxly_bridge_and_call: false
