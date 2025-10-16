@@ -8,13 +8,6 @@ if [ $# -lt 1 ]; then
     exit 1
 fi
 
-if [ ! -f $SCRIPT_DIR/l1-preallocated-mnemonics.sh ]; then
-    echo "错误: l1-preallocated-mnemonics.sh 文件不存在"
-    exit 1
-fi
-# 导入准备好的助记词文件
-source $SCRIPT_DIR/l1-preallocated-mnemonics.sh
-
 COUNT=$1
 shift
 REMOTE_CMD="$@"
@@ -33,6 +26,19 @@ RUN_DURATION=50 # 运行时长，单位为分钟
 # L1 配置
 L1_CHAIN_ID=71
 L1_RPC_URL="https://cfx-testnet-cdk-rpc-proxy.yidaiyilu0.site"
+
+if [ ! -f $SCRIPT_DIR/l1-preallocated-mnemonics.sh ]; then
+    echo "错误: l1-preallocated-mnemonics.sh 文件不存在"
+    exit 1
+fi
+# 导入准备好的助记词文件
+source $SCRIPT_DIR/l1-preallocated-mnemonics.sh
+
+# 数组长度必须大于等于 COUNT
+if [ ${#L1_PREALLOCATED_MNEMONICS[@]} -lt $COUNT ]; then
+    echo "错误: L1_PREALLOCATED_MNEMONICS 数组长度必须大于等于 COUNT"
+    exit 1
+fi
 
 echo "👉 正在启动 $COUNT 台 EC2 实例..."
 INSTANCE_IDS=$(aws ec2 run-instances \
