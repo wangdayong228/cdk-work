@@ -1,0 +1,45 @@
+deployment_stages:
+  deploy_l1: false # Disable local L1.
+  deploy_agglayer: false
+  deploy_l2_contracts: true
+  deploy_optimism_rollup: false
+  deploy_op_succinct: false
+  deploy_cdk_bridge_ui: false
+
+args:
+  verbosity: debug
+  additional_services:
+    - observability
+    # - blockscout
+    - status_checker
+    # - test_runner
+    # - bridge_spammer
+    # - agglogger
+  sequencer_type: erigon
+  consensus_contract_type: rollup
+  agglayer_contracts_image: europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/agglayer-contracts:v11.0.0-rc.2-fork.12
+  zkevm_prover_image: hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12
+  use_dynamic_ports: true
+  zkevm_bridge_ui_image: zkevm-bridge-ui:0006445 # local build image, 编译方式参看 docker/README.md
+  cdk_node_image: cdk:latest # local build image, 编译方式, 在 cdk 目录下执行 make build-docker
+  # 区分每条链
+  deployment_suffix: '-1'
+  zkevm_rollup_chain_id: $L2_CHAIN_ID
+  deploy_parameters_salt: $DEPLOY_PARAMETERS_SALT
+
+  ## local devnet
+  # l1_chain_id: 1025
+  # l1_rpc_url: http://172.17.0.1:8545
+  ## Conflux eSpace testnet
+  l1_chain_id: $L1_CHAIN_ID
+  # rpc vip key 到期时间 10/17/2025 11:31:32 AM
+  # l1_rpc_url: https://evmtestnet.confluxrpc.com/7mCztCVfajeGYYkWSea3Fk6ojynwUmBZ6L1ue2YTkudVfus7XkqbKnoMcYVYZYYVJSjDw73u45Nr4zHmyRLaG5x2w
+  l1_rpc_url: $L1_RPC_URL
+
+  # l1_ws_url: wss://cfx-espace-testnet.gateway.tenderly.co/3fHgQnAD9BSz8b6YOCIJbW
+  # 0xBB23d861A96cB0b35a1e5F2706683115B10811B2
+  l1_preallocated_mnemonic: $L1_PREALLOCATED_MNEMONIC
+  l1_funding_amount: 20ether
+
+  ## L2 Config
+  $L2_CONFIG

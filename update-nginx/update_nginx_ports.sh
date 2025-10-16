@@ -8,43 +8,62 @@ set -x
 if [ $# -eq 1 ]; then
   ENCLAVE_NAME="$1"
 else
-  ENCLAVE_NAME="cdk-cfx"  # 默认值
+  echo "错误：必须指定 ENCLAVE_NAME！"
+  exit 1
 fi
 
 echo "使用 Enclave: $ENCLAVE_NAME"
 
+# 获取脚本所在目录
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # 从模板文件读取内容
-TEMPLATE_FILE="${ENCLAVE_NAME}.template"
+TEMPLATE_FILE="${SCRIPT_DIR}/${ENCLAVE_NAME}-upstreams.tmpl.conf"
+INGRESS_FILE="${SCRIPT_DIR}/${ENCLAVE_NAME}-ingress.conf"
 if [ ! -f "$TEMPLATE_FILE" ]; then
   echo "错误：模板文件 $TEMPLATE_FILE 不存在！"
   exit 1
 fi
+
+# 确保 ingress 源文件存在
+if [ ! -f "$INGRESS_FILE" ]; then
+  echo "错误：$INGRESS_FILE 不存在"
+  exit 1
+fi
+
+# 复制时显式目标文件名，并使用 sudo；按需选择 -f(覆盖) 或 -n(不覆盖)
+sudo cp -f "$INGRESS_FILE" "/etc/nginx/sites-available/${ENCLAVE_NAME}-ingress.conf"
+# 创建/更新符号链接：-s(软链) -f(覆盖已存在) -n(不跟随目录) -v(可选：打印)
+sudo ln -sfn "/etc/nginx/sites-available/${ENCLAVE_NAME}-ingress.conf" "/etc/nginx/sites-enabled/${ENCLAVE_NAME}-ingress.conf"
 
 # 读取模板文件内容
 template=$(cat "$TEMPLATE_FILE")
 echo "已加载模板文件: $TEMPLATE_FILE"
 
 # 获取 kurtosis 中服务的 HTTP 端口
-L1_RPC_PORT=$zkc_l1_rpc||"http://127.0.0.1:21000"
-if [ "$ENCLAVE_NAME" != "cdk-cfx" ]; then
-    L1_RPC_PORT=$zk_l1_rpc||$L1_RPC_PORT
-fi
+
+# 获取 kurtosis 中服务的 HTTP 端口
+# L1_RPC_PORT=$zkc_l1_rpc||"http://127.0.0.1:3030"
+
+# if [ "$ENCLAVE_NAME" == "cdk-eth" ]; then
+#     # L1_RPC_PORT="http://"$(kurtosis port print ${ENCLAVE_NAME} el-1-geth-lighthouse rpc)
+#     L1_RPC_PORT="https://eth.yidaiyilu0.site/rpc"
+# fi
 
 
 # if [ "$ENCLAVE_NAME" != "cdk-cfx" ]; then
-#     L1_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} cdk-erigon-rpc-001 rpc)
+#     L1_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} cdk-erigon-rpc-1 rpc)
 # fi
 
-L2_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} cdk-erigon-rpc-001 rpc)
-BRIDGE_UI_PORT=$(kurtosis port print ${ENCLAVE_NAME} zkevm-bridge-ui-001 web-ui)
-BRIDGE_SERVICE_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} zkevm-bridge-service-001 rpc)
-PROMETHEUS_PORT=$(kurtosis port print ${ENCLAVE_NAME} prometheus-001 http)
-GRAFANA_PORT=$(kurtosis port print ${ENCLAVE_NAME} grafana-001 dashboards)
+L2_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} cdk-erigon-rpc-1 rpc)
+# TODO: kurtosis 当前没有启动 bridge-ui 服务，启动后更新
+BRIDGE_UI_PORT=http://127.0.0.1:9999 #$(kurtosis port print ${ENCLAVE_NAME} zkevm-bridge-ui-1 web-ui)
+BRIDGE_SERVICE_RPC_PORT=http://127.0.0.1:9999 #$(kurtosis port print ${ENCLAVE_NAME} zkevm-bridge-service-1 rpc)
+PROMETHEUS_PORT=$(kurtosis port print ${ENCLAVE_NAME} prometheus-1 http)
+GRAFANA_PORT=$(kurtosis port print ${ENCLAVE_NAME} grafana-1 dashboards)
 
 
 # 替换模板中的变量
-output=$(echo "$template" | sed "s|{{cdk_l1_rpc}}|$L1_RPC_PORT|g" \
-                          | sed "s|{{cdk_l2_rpc}}|$L2_RPC_PORT|g" \
+output=$(echo "$template" | sed "s|{{cdk_l2_rpc}}|$L2_RPC_PORT|g" \
                           | sed "s|{{cdk_bridge_ui}}|$BRIDGE_UI_PORT|g" \
                           | sed "s|{{cdk_bridge_service_rpc}}|$BRIDGE_SERVICE_RPC_PORT|g" \
                           | sed "s|{{cdk_grafana}}|$GRAFANA_PORT|g" \
@@ -57,10 +76,12 @@ echo "$output"
 echo "----------------------------------------"
 
 # 交互式询问是否接受
-read -p "是否接受此配置并写入到/etc/nginx/sites-available/${ENCLAVE_NAME}-ports? (y/n): " answer
+# read -p "是否接受此配置并写入到/etc/nginx/sites-available/${ENCLAVE_NAME}-upstream.conf? (y/n): " answer
 
-# 转换为小写以便于处理
-answer=$(echo "$answer" | tr '[:upper:]' '[:lower:]')
+# # 转换为小写以便于处理
+# answer=$(echo "$answer" | tr '[:upper:]' '[:lower:]')
+
+answer="y"
 
 if [[ "$answer" == "y" || "$answer" == "yes" ]]; then
     # 写入文件
@@ -71,10 +92,12 @@ if [[ "$answer" == "y" || "$answer" == "yes" ]]; then
         
         # 创建符号链接到 sites-enabled 目录
         LINK_FILE="/etc/nginx/sites-enabled/${ENCLAVE_NAME}-ports"
-        if [ ! -L "$LINK_FILE" ]; then
-            echo "创建符号链接到 sites-enabled 目录..."
-            sudo ln -s "$CONFIG_FILE" "$LINK_FILE" || echo "创建符号链接失败，请手动执行: sudo ln -s $CONFIG_FILE $LINK_FILE"
+        if [ -L "$LINK_FILE" ]; then
+            sudo rm -f "$LINK_FILE"
         fi
+
+        echo "创建符号链接到 sites-enabled 目录..."
+        sudo ln -s "$CONFIG_FILE" "$LINK_FILE" || echo "创建符号链接失败，请手动执行: sudo ln -s $CONFIG_FILE $LINK_FILE"
         
         echo "提示：正在测试和重新加载Nginx配置..."
         nginx -t  # 测试配置

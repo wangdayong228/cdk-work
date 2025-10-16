@@ -21,7 +21,5 @@
 1. 设置绑定静态宿主机端口： `args.use_dynamic_ports: false` （可能会因为端口冲突之类的部署失败）
 
 ## MISC
-
-子涵在进行 l2 的跨链测试, cdk 重新部署后, 需要给它的测试账号转一笔钱 `0x180F2613c52c903A0d79B8025D8B14e461b22eF1`
-
-并且发送新的 合约地址
+- L2 admin 账户会有初始资金，配置在 params-xxx.yml 文件中 `zkevm_l2_admin_private_key`
+- 子涵在进行 l2 的跨链测试, cdk 重新部署后, 需要给它的测试账号转一笔钱 `0x180F2613c52c903A0d79B8025D8B14e461b22eF1`; 并且发送新的 合约地址；合约地址在日志中搜索 “Command returned with exit code '0' and the following output”

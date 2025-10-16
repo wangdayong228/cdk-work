@@ -197,6 +197,10 @@ created by github.com/0xPolygon/cdk/aggregator.(*Aggregator).Start in goroutine 
 	/go/src/github.com/0xPolygon/cdk/aggregator/aggregator.go:308 +0x125
 ```
 
+## L1InfoTree mismatch 问题
+
+合约中计算 ExitRoot Leaf 时用到了链上的 ParentHash，而链下计算使用的是rpc 获取的 ParentHash，会导致双方不一致。所以 jsonrpc-proxy 不能使用修正过的 BlockHash。
+
 ### misc
 **event相关日志**
 ```md
