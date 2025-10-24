@@ -14,6 +14,11 @@ fi
 
 echo "使用 Enclave: $ENCLAVE_NAME"
 
+if [ -z "$L1_RPC_URL" ]; then
+  echo "错误：请设置 L1_RPC_URL 环境变量！"
+  exit 1
+fi
+
 # 获取脚本所在目录
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # 从模板文件读取内容
@@ -57,13 +62,14 @@ echo "已加载模板文件: $TEMPLATE_FILE"
 L2_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} cdk-erigon-rpc-1 rpc)
 # TODO: kurtosis 当前没有启动 bridge-ui 服务，启动后更新
 BRIDGE_UI_PORT=http://127.0.0.1:9999 #$(kurtosis port print ${ENCLAVE_NAME} zkevm-bridge-ui-1 web-ui)
-BRIDGE_SERVICE_RPC_PORT=http://127.0.0.1:9999 #$(kurtosis port print ${ENCLAVE_NAME} zkevm-bridge-service-1 rpc)
+BRIDGE_SERVICE_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} zkevm-bridge-service-1 rpc)
 PROMETHEUS_PORT=$(kurtosis port print ${ENCLAVE_NAME} prometheus-1 http)
 GRAFANA_PORT=$(kurtosis port print ${ENCLAVE_NAME} grafana-1 dashboards)
 
 
 # 替换模板中的变量
-output=$(echo "$template" | sed "s|{{cdk_l2_rpc}}|$L2_RPC_PORT|g" \
+output=$(echo "$template" | sed "s|{{cdk_l1_rpc}}|$L1_RPC_URL|g" \
+                          | sed "s|{{cdk_l2_rpc}}|$L2_RPC_PORT|g" \
                           | sed "s|{{cdk_bridge_ui}}|$BRIDGE_UI_PORT|g" \
                           | sed "s|{{cdk_bridge_service_rpc}}|$BRIDGE_SERVICE_RPC_PORT|g" \
                           | sed "s|{{cdk_grafana}}|$GRAFANA_PORT|g" \

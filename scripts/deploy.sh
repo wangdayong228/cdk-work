@@ -1,5 +1,11 @@
 #!/bin/bash
-set -x
+set -xeuo pipefail
+trap 'echo "命令失败: 行 $LINENO"; exit 1' ERR
+
+# 确保可执行存在
+command -v polycli >/dev/null 2>&1 || { echo "未找到 polycli"; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "未找到 jq"; exit 1; }
+command -v awk >/dev/null 2>&1 || { echo "未找到 awk"; exit 1; }
 
 # # 转换参数格式
 # network_name=${1#cdk-}          # 移除 "cdk-" 前缀
@@ -64,7 +70,10 @@ TEMP_CONFIG="$SCRIPT_DIR/params_$NETWORK.yml"
 LOG_FILE="$SCRIPT_DIR/deploy-$NETWORK.log"
 UPDATE_NGINX_SCRIPT="$SCRIPT_DIR/../update-nginx/update_nginx_ports.sh"
 export L2_CONFIG=$(polycli wallet create --addresses 12 | jq -r '.Addresses[] | [.ETHAddress, .HexPrivateKey] | @tsv' | awk 'BEGIN{split("sequencer,aggregator,claimtxmanager,timelock,admin,loadtest,agglayer,dac,proofsigner,l1testing,claimsponsor,l1_panoptichain",roles,",")} {print "  # " roles[NR] "\n  zkevm_l2_" roles[NR] "_address: \"" $1 "\""; print "  zkevm_l2_" roles[NR] "_private_key: \"0x" $2 "\"\n"}')
+[ -n "${L2_CONFIG:-}" ] || { echo "L2_CONFIG 为空"; exit 1; }
 export DEPLOY_PARAMETERS_SALT=0x$(openssl rand -hex 32)
+[ -n "${DEPLOY_PARAMETERS_SALT:-}" ] || { echo "DEPLOY_PARAMETERS_SALT 为空"; exit 1; }
+
 
 # 替换模板中的环境变量
 # sed "s/{{PRIVATE_KEY}}/$PRIVATE_KEY/g ; s/{{L2_CHAIN_ID}}/$L2_CHAIN_ID/g ; s/{{DEPLOY_PARAMETERS_SALT}}/$DEPLOY_PARAMETERS_SALT/g" params.template.yml > "$TEMP_CONFIG"
