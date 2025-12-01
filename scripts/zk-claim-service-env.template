@@ -1,0 +1,58 @@
+# 用途：1. 部署合约 2. 在 L1 和 L2 claimMessage
+PRIVATE_KEY=$PRIVATE_KEY
+
+# ====== 自动处理 L2->L1 跨链交易使用 =======================================================
+# RPC URLs
+L1_RPC_URL=$L1_RPC_URL
+L2_RPC_URL=http://127.0.0.1/l2rpc
+
+# polygonZkEVMBridgeAddress
+BRIDGE_ADDRESS=$polygonZkEVMBridgeAddress
+
+# Bridge service API
+BRIDGE_SERVICE_URL=http://127.0.0.1/bridgeservice
+
+# ======= 自动处理 L1->L2 跨链交易使用 ======================================================
+L1_RPC_URL_REV=http://127.0.0.1/l2rpc
+L2_RPC_URL_REV=https://127.0.0.1/rpc
+
+# polygonZkEVML2BridgeAddress
+BRIDGE_ADDRESS_REV=$polygonZkEVML2BridgeAddress
+
+# Bridge service API
+BRIDGE_SERVICE_URL_REV=http://127.0.0.1/bridgeservice
+
+#====== 【不修改】，双向自动处理跨链交易都会使用 ==================================
+# ABI Path
+BRIDGE_ABI_PATH=./abis/bridge.json
+
+# Database configuration
+DB_PATH=./bridge-events.db
+
+# Network IDs
+L1_NETWORK_ID=0
+L2_NETWORK_ID=1
+
+# Gas settings
+GAS_LIMIT=3000000
+
+# Service configuration
+# Event Listener
+EVENT_POLLING_INTERVAL=60000
+
+# Proof Fetcher
+POLLING_INTERVAL=60000
+MAX_RETRIES=120
+BATCH_SIZE=10
+
+# Transaction Sender
+TX_POLLING_INTERVAL=30000
+TX_MAX_RETRIES=60
+TX_BATCH_SIZE=10
+
+# Database configuration
+DB_PATH_REV=./bridge-events-rev.db
+
+# Network IDs
+L1_NETWORK_ID_REV=1
+L2_NETWORK_ID_REV=0
