@@ -66,9 +66,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 创建临时配置文件
 TEMP_CONFIG="$SCRIPT_DIR/params_$NETWORK.yml"
-
 LOG_FILE="$SCRIPT_DIR/deploy-$NETWORK.log"
 UPDATE_NGINX_SCRIPT="$SCRIPT_DIR/../update-nginx/update_nginx_ports.sh"
+CONTRACTS_FILE="$SCRIPT_DIR/output/contracts-$NETWORK.json"
+
 export L2_CONFIG=$(polycli wallet create --addresses 12 | jq -r '.Addresses[] | [.ETHAddress, .HexPrivateKey] | @tsv' | awk 'BEGIN{split("sequencer,aggregator,claimtxmanager,timelock,admin,loadtest,agglayer,dac,proofsigner,l1testing,claimsponsor,l1_panoptichain",roles,",")} {print "  # " roles[NR] "\n  zkevm_l2_" roles[NR] "_address: \"" $1 "\""; print "  zkevm_l2_" roles[NR] "_private_key: \"0x" $2 "\"\n"}')
 [ -n "${L2_CONFIG:-}" ] || { echo "L2_CONFIG 为空"; exit 1; }
 export DEPLOY_PARAMETERS_SALT=0x$(openssl rand -hex 32)
@@ -85,13 +86,13 @@ echo "generated $TEMP_CONFIG"
 
 # 运行 kurtosis
 # kurtosis run --cli-log-level debug -v EXECUTABLE --enclave op-eth github.com/wangdayong228/optimism-package@8d97b22f5bce73106fea4d3cc063486cca359928 --args-file "$TEMP_CONFIG" 2>&1 > "$LOG_FILE"
-kurtosis run --cli-log-level debug -v EXECUTABLE --enclave $1 --args-file $TEMP_CONFIG github.com/Pana/kurtosis-cdk@aa5f6f39dd8fa6157abe5736d81a2c9eda1536fc 2>&1 >./deploy-$NETWORK.log
+kurtosis run --cli-log-level debug -v EXECUTABLE --enclave $1 --args-file $TEMP_CONFIG github.com/Pana/kurtosis-cdk@aa5f6f39dd8fa6157abe5736d81a2c9eda1536fc 2>&1 >$LOG_FILE
 
 # 设置 nginx
 bash "$UPDATE_NGINX_SCRIPT" $1
 
-# 清理临时文件
-# rm -f "$TEMP_CONFIG"
+# 导出合约地址
+kurtosis service exec $1 contracts-1 "cat /opt/zkevm/combined.json |jq {polygonZkEVMBridgeAddress:.polygonZkEVMBridgeAddress, polygonZkEVML2BridgeAddress:.polygonZkEVML2BridgeAddress}" >$CONTRACTS_FILE
 
 # 给一直发交易的地址转账
 # cast send --legacy --rpc-url $zkc_l2_rpc --private-key $zkc_l2_pk --value 1000ether 0x8943545177806ED17B9F23F0a21ee5948eCaa776
