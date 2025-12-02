@@ -1,5 +1,5 @@
 # 用途：1. 部署合约 2. 在 L1 和 L2 claimMessage
-PRIVATE_KEY=$PRIVATE_KEY
+PRIVATE_KEY=$ZK_CLAIM_SERVICE_PRIVATE_KEY
 
 # ====== 自动处理 L2->L1 跨链交易使用 =======================================================
 # RPC URLs
