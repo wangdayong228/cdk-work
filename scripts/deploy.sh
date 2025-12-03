@@ -12,21 +12,8 @@ fi
 command -v polycli >/dev/null 2>&1 || { echo "未找到 polycli"; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "未找到 jq"; exit 1; }
 command -v awk >/dev/null 2>&1 || { echo "未找到 awk"; exit 1; }
-
-# # 转换参数格式
-# network_name=${1#cdk-}          # 移除 "cdk-" 前缀
-# network_name=${network_name//-/_}  # 将 "-" 替换为 "_"
-
-# if kurtosis enclave ls | grep -q "$1"; then
-#     kurtosis enclave rm -f $1
-# fi
-
-# sh ./update-salt.sh
-# kurtosis run --cli-log-level debug -v EXECUTABLE --enclave $1 --args-file ./params_$network_name.yml ../../kurtosis-cdk 2>&1 > ./deploy-$1.log
-
-# echo "Remenber send eth to 0x8943545177806ED17B9F23F0a21ee5948eCaa776 on zkc_l2_rpc"
-# # 给一直发交易的地址转账
-# cast send --legacy --rpc-url $zkc_l2_rpc --private-key $zkc_l2_pk --value 1000ether 0x8943545177806ED17B9F23F0a21ee5948eCaa776
+command -v envsubst >/dev/null 2>&1 || { echo "未找到 envsubst"; exit 1; }
+command -v cast >/dev/null 2>&1 || { echo "未找到 cast"; exit 1; }
 
 # 提权为 root
 if [ "$EUID" -ne 0 ]; then
@@ -60,39 +47,36 @@ if [ -z "$L1_CHAIN_ID" ] || [ -z "$L1_RPC_URL" ] || [ -z "$L1_PREALLOCATED_MNEMO
   exit 1
 fi
 
-if [ ! -f params.template.yml ]; then
+# 获取脚本所在目录
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -f $SCRIPT_DIR/params.template.yml ]; then
   echo "错误: params.template.yml 文件不存在"
   exit 1
 fi
-
-# sleep 5
-
-# 获取脚本所在目录
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mkdir -p $SCRIPT_DIR/../output
 
 # 创建临时配置文件
 TEMP_CONFIG="$SCRIPT_DIR/params_$NETWORK.yml"
 LOG_FILE="$SCRIPT_DIR/deploy-$NETWORK.log"
 UPDATE_NGINX_SCRIPT="$SCRIPT_DIR/../update-nginx/update_nginx_ports.sh"
-CONTRACTS_FILE="$SCRIPT_DIR/output/contracts-$NETWORK.json"
+DEPLOY_RESULT_FILE="$SCRIPT_DIR/../output/deploy-result-$NETWORK.json"
 
-export L2_CONFIG=$(polycli wallet create --addresses 12 | jq -r '.Addresses[] | [.ETHAddress, .HexPrivateKey] | @tsv' | awk 'BEGIN{split("sequencer,aggregator,claimtxmanager,timelock,admin,loadtest,agglayer,dac,proofsigner,l1testing,claimsponsor,l1_panoptichain",roles,",")} {print "  # " roles[NR] "\n  zkevm_l2_" roles[NR] "_address: \"" $1 "\""; print "  zkevm_l2_" roles[NR] "_private_key: \"0x" $2 "\"\n"}')
+export L2_CONFIG=$(polycli wallet inspect --mnemonic "$L1_PREALLOCATED_MNEMONIC" --addresses 13 | jq -r '.Addresses[1:][] | [.ETHAddress, .HexPrivateKey] | @tsv' | awk 'BEGIN{split("sequencer,aggregator,claimtxmanager,timelock,admin,loadtest,agglayer,dac,proofsigner,l1testing,claimsponsor,l1_panoptichain",roles,",")} {print "  # " roles[NR] "\n  zkevm_l2_" roles[NR] "_address: \"" $1 "\""; print "  zkevm_l2_" roles[NR] "_private_key: \"0x" $2 "\"\n"}')
 [ -n "${L2_CONFIG:-}" ] || { echo "L2_CONFIG 为空"; exit 1; }
+
+export zkevm_l2_admin_private_key=$(cast wallet private-key --mnemonic $L1_PREALLOCATED_MNEMONIC --mnemonic-index 5)
+export zkevm_l2_admin_address=$(cast wallet address --private-key $L2_ADMIN_PRIVATE_KEY)
+
 export DEPLOY_PARAMETERS_SALT=0x$(openssl rand -hex 32)
 [ -n "${DEPLOY_PARAMETERS_SALT:-}" ] || { echo "DEPLOY_PARAMETERS_SALT 为空"; exit 1; }
-
-
-# 替换模板中的环境变量
-# sed "s/{{PRIVATE_KEY}}/$PRIVATE_KEY/g ; s/{{L2_CHAIN_ID}}/$L2_CHAIN_ID/g ; s/{{DEPLOY_PARAMETERS_SALT}}/$DEPLOY_PARAMETERS_SALT/g" params.template.yml > "$TEMP_CONFIG"
-# echo $L2_CONFIG >> $TEMP_CONFIG
 
 # 运行 kurtosis
 if [ "$DRYRUN" == "true" ]; then
   echo "[dry-run] envsubst <params.template.yml >$TEMP_CONFIG"
   echo "[dry-run] kurtosis run --cli-log-level debug -v EXECUTABLE --enclave $1 --args-file $TEMP_CONFIG github.com/Pana/kurtosis-cdk@aa5f6f39dd8fa6157abe5736d81a2c9eda1536fc 2>&1 >$LOG_FILE"
   echo "[dry-run] set nginx for $1"
-  echo "[dry-run] exported contracts to: $CONTRACTS_FILE"
-  echo "{polygonZkEVMBridgeAddress: \"0x0000000000000000000000000000000000000000\", polygonZkEVML2BridgeAddress: \"0x0000000000000000000000000000000000000000\"}" > $CONTRACTS_FILE
+  echo "[dry-run] exported contracts to: $DEPLOY_RESULT_FILE"
+  echo "{ \"zkevm_l2_admin_private_key\": \"0x0000000000000000000000000000000000000000000000000000000000000000\", \"zkevm_l2_admin_address\": \"0x0000000000000000000000000000000000000000\", \"polygonZkEVMBridgeAddress\": \"0x0000000000000000000000000000000000000000\", \"polygonZkEVML2BridgeAddress\": \"0x0000000000000000000000000000000000000000\"}" > $DEPLOY_RESULT_FILE
 else
   envsubst <params.template.yml >$TEMP_CONFIG
   echo "generated params file: $TEMP_CONFIG"
@@ -103,8 +87,11 @@ else
   bash "$UPDATE_NGINX_SCRIPT" $1
   echo "set nginx for $1"
   # 导出合约地址
-  kurtosis service exec $1 contracts-1 "cat /opt/zkevm/combined.json |jq {polygonZkEVMBridgeAddress:.polygonZkEVMBridgeAddress, polygonZkEVML2BridgeAddress:.polygonZkEVML2BridgeAddress}" >$CONTRACTS_FILE
-  echo "exported contracts to: $CONTRACTS_FILE"
+  kurtosis service exec $1 contracts-1 "cat /opt/zkevm/combined.json |jq {polygonZkEVMBridgeAddress:.polygonZkEVMBridgeAddress, polygonZkEVML2BridgeAddress:.polygonZkEVML2BridgeAddress}" >$DEPLOY_RESULT_FILE
+  echo "exported contracts to: $DEPLOY_RESULT_FILE"
+  # 导出 l2_admin_private_key
+  jq ".+ {"zkevm_l2_admin_private_key": "$L2_ADMIN_PRIVATE_KEY", "zkevm_l2_admin_address": "$L2_ADMIN_ADDRESS"}" $DEPLOY_RESULT_FILE > $DEPLOY_RESULT_FILE.tmp
+  mv $DEPLOY_RESULT_FILE.tmp $DEPLOY_RESULT_FILE
 fi
 
 # 给一直发交易的地址转账

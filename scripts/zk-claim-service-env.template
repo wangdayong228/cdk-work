@@ -1,6 +1,13 @@
 # 用途：1. 部署合约 2. 在 L1 和 L2 claimMessage
 PRIVATE_KEY=$ZK_CLAIM_SERVICE_PRIVATE_KEY
 
+# ====== 基本信息 =======================================================
+# 在 L1 的 zkBridgeReceiver（桥中继）合约地址
+L1_BRIDGE_RELAY_CONTRACT=$L1_BRIDGE_RELAY_CONTRACT
+
+# Layer2 类型编号（与合约约定一致，0/1/2 表示 zk/op/bridge）
+L2_TYPE=$L2_TYPE
+
 # ====== 自动处理 L2->L1 跨链交易使用 =======================================================
 # RPC URLs
 L1_RPC_URL=$L1_RPC_URL
