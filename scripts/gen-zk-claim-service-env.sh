@@ -19,18 +19,18 @@ NETWORK=${NETWORK//-/_} # 将 "-" 替换为 "_"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_DIR="$SCRIPT_DIR/../output"
-CONTRACTS_FILE="$OUT_DIR/contracts-$NETWORK.json"
+DEPLOY_RESULT_FILE="$OUT_DIR/deploy-result-$NETWORK.json"
 
 # 读取合约地址（缺失则为空并告警）
-polygonZkEVMBridgeAddress="$(jq -r '.polygonZkEVMBridgeAddress // empty' "$CONTRACTS_FILE")"
+polygonZkEVMBridgeAddress="$(jq -r '.polygonZkEVMBridgeAddress // empty' "$DEPLOY_RESULT_FILE")"
 if [ -z "$polygonZkEVMBridgeAddress" ]; then
-  echo "警告: contracts.json 缺少 polygonZkEVMBridgeAddress"
+  echo "警告: deploy-result.json 缺少 polygonZkEVMBridgeAddress"
   exit 1
 fi
 
-polygonZkEVML2BridgeAddress="$(jq -r '.polygonZkEVML2BridgeAddress // empty' "$CONTRACTS_FILE")"
+polygonZkEVML2BridgeAddress="$(jq -r '.polygonZkEVML2BridgeAddress // empty' "$DEPLOY_RESULT_FILE")"
 if [ -z "$polygonZkEVML2BridgeAddress" ]; then
-  echo "警告: contracts.json 缺少 polygonZkEVML2BridgeAddress"
+  echo "警告: deploy-result.json 缺少 polygonZkEVML2BridgeAddress"
   exit 1
 fi
 
