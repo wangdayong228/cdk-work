@@ -64,8 +64,8 @@ DEPLOY_RESULT_FILE="$SCRIPT_DIR/../output/deploy-result-$NETWORK.json"
 export L2_CONFIG=$(polycli wallet inspect --mnemonic "$L1_PREALLOCATED_MNEMONIC" --addresses 13 | jq -r '.Addresses[1:][] | [.ETHAddress, .HexPrivateKey] | @tsv' | awk 'BEGIN{split("sequencer,aggregator,claimtxmanager,timelock,admin,loadtest,agglayer,dac,proofsigner,l1testing,claimsponsor,l1_panoptichain",roles,",")} {print "  # " roles[NR] "\n  zkevm_l2_" roles[NR] "_address: \"" $1 "\""; print "  zkevm_l2_" roles[NR] "_private_key: \"0x" $2 "\"\n"}')
 [ -n "${L2_CONFIG:-}" ] || { echo "L2_CONFIG 为空"; exit 1; }
 
-export zkevm_l2_admin_private_key=$(cast wallet private-key --mnemonic $L1_PREALLOCATED_MNEMONIC --mnemonic-index 5)
-export zkevm_l2_admin_address=$(cast wallet address --private-key $L2_ADMIN_PRIVATE_KEY)
+export zkevm_l2_admin_private_key=$(cast wallet private-key --mnemonic "$L1_PREALLOCATED_MNEMONIC" --mnemonic-index 5)
+export zkevm_l2_admin_address=$(cast wallet address --private-key "$L2_ADMIN_PRIVATE_KEY")
 
 export DEPLOY_PARAMETERS_SALT=0x$(openssl rand -hex 32)
 [ -n "${DEPLOY_PARAMETERS_SALT:-}" ] || { echo "DEPLOY_PARAMETERS_SALT 为空"; exit 1; }
