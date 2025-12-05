@@ -56,6 +56,7 @@ fi
 mkdir -p $SCRIPT_DIR/../output
 
 # 创建临时配置文件
+TEMPLATE_FILE="$SCRIPT_DIR/params.template.yml"
 TEMP_CONFIG="$SCRIPT_DIR/params_$NETWORK.yml"
 LOG_FILE="$SCRIPT_DIR/deploy-$NETWORK.log"
 UPDATE_NGINX_SCRIPT="$SCRIPT_DIR/../update-nginx/update_nginx_ports.sh"
@@ -78,7 +79,7 @@ if [ "$DRYRUN" == "true" ]; then
   echo "[dry-run] exported contracts to: $DEPLOY_RESULT_FILE"
   echo "{ \"zkevm_l2_admin_private_key\": \"0x0000000000000000000000000000000000000000000000000000000000000000\", \"zkevm_l2_admin_address\": \"0x0000000000000000000000000000000000000000\", \"polygonZkEVMBridgeAddress\": \"0x0000000000000000000000000000000000000000\", \"polygonZkEVML2BridgeAddress\": \"0x0000000000000000000000000000000000000000\"}" > $DEPLOY_RESULT_FILE
 else
-  envsubst <params.template.yml >$TEMP_CONFIG
+  envsubst <$TEMPLATE_FILE >$TEMP_CONFIG
   echo "generated params file: $TEMP_CONFIG"
   # kurtosis run --cli-log-level debug -v EXECUTABLE --enclave op-eth github.com/wangdayong228/optimism-package@8d97b22f5bce73106fea4d3cc063486cca359928 --args-file "$TEMP_CONFIG" 2>&1 > "$LOG_FILE"
   kurtosis run --cli-log-level debug -v EXECUTABLE --enclave $1 --args-file $TEMP_CONFIG github.com/Pana/kurtosis-cdk@aa5f6f39dd8fa6157abe5736d81a2c9eda1536fc 2>&1 >$LOG_FILE
