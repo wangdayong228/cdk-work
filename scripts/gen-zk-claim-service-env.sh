@@ -1,5 +1,6 @@
 #!/bin/bash
-set -xEeuo pipefail
+set -xEueo pipefail
+trap 'echo "命令失败: 行 $LINENO"; exit 1' ERR
 
 if [ $# -lt 1 ]; then
   echo "错误: 请提供网络名称参数"

@@ -1,6 +1,6 @@
 #!/bin/bash
 set -xeuo pipefail
-trap 'echo "命令失败: 行 $LINENO"; exit 1' ERR
+trap 'echo "🔴 deploy.sh 执行失败: 行 $LINENO, 错误信息: $BASH_COMMAND"; exit 1' ERR
 
 DRYRUN=${DRYRUN:-false}
 if [ "$DRYRUN" == "true" ]; then

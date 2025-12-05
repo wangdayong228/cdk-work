@@ -1,8 +1,6 @@
 #!/bin/bash
-
-# 设置错误时退出
-set -e
-set -x
+set -xEueo pipefail
+trap 'echo "🔴 update_nginx_ports.sh 执行失败: 行 $LINENO, 错误信息: $BASH_COMMAND"; exit 1' ERR
 
 # 处理命令行参数 - 只接受一个参数作为 ENCLAVE_NAME
 if [ $# -eq 1 ]; then
