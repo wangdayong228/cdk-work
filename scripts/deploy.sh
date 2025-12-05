@@ -52,9 +52,11 @@ fi
 NETWORK=${1#cdk-}            # 移除 "cdk-" 前缀
 NETWORK=${NETWORK//-/_} # 将 "-" 替换为 "_"
 
-if kurtosis enclave ls | grep -q "$1"; then
-  kurtosis enclave rm -f $1
-  echo "删除旧的 enclave $1"
+if [ "$NEED_DEPLOY_CDK" == "true" ]; then
+  if kurtosis enclave ls | grep -q "$1"; then
+    kurtosis enclave rm -f $1
+    echo "删除旧的 enclave $1"
+  fi
 fi
 
 # 检查环境变量
