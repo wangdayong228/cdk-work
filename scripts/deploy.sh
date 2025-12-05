@@ -115,7 +115,7 @@ else
   bash "$UPDATE_NGINX_SCRIPT" $1
   echo "set nginx for $1"
   # 导出合约地址
-  kurtosis service exec $1 contracts-1 "cat /opt/zkevm/combined.json |jq {polygonZkEVMBridgeAddress:.polygonZkEVMBridgeAddress, polygonZkEVML2BridgeAddress:.polygonZkEVML2BridgeAddress}" >$DEPLOY_RESULT_FILE
+  kurtosis service exec "$1" contracts-1 "jq '{polygonZkEVMBridgeAddress, polygonZkEVML2BridgeAddress}' /opt/zkevm/combined.json" >"$DEPLOY_RESULT_FILE"
   echo "exported contracts to: $DEPLOY_RESULT_FILE"
   # 导出 l2_admin_private_key
   jq ".+ {"zkevm_l2_admin_private_key": "$L2_ADMIN_PRIVATE_KEY", "zkevm_l2_admin_address": "$L2_ADMIN_ADDRESS"}" $DEPLOY_RESULT_FILE > $DEPLOY_RESULT_FILE.tmp
