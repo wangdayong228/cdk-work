@@ -36,10 +36,10 @@ command -v awk >/dev/null 2>&1 || { echo "未找到 awk"; exit 1; }
 command -v envsubst >/dev/null 2>&1 || { echo "未找到 envsubst"; exit 1; }
 command -v cast >/dev/null 2>&1 || { echo "未找到 cast"; exit 1; }
 
-# 提权为 root
-if [ "$EUID" -ne 0 ]; then
-  exec sudo -E bash "$0" "$@"
-fi
+# # 提权为 root
+# if [ "$EUID" -ne 0 ]; then
+#   exec sudo -E bash "$0" "$@"
+# fi
 
 # 至少需要一个参数
 if [ $# -lt 1 ]; then
