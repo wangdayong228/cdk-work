@@ -108,9 +108,6 @@ else
     echo "generated params file: $TEMP_CONFIG"
     kurtosis run --cli-log-level debug -v EXECUTABLE --enclave $1 --args-file $TEMP_CONFIG github.com/Pana/kurtosis-cdk@aa5f6f39dd8fa6157abe5736d81a2c9eda1536fc 2>&1 >$LOG_FILE
 
-    # 设置 nginx
-    bash "$UPDATE_NGINX_SCRIPT" $1
-    echo "set nginx for $1"
     # 导出合约地址
     kurtosis service exec "$1" contracts-1 "jq '{polygonZkEVMBridgeAddress, polygonZkEVML2BridgeAddress}' /opt/zkevm/combined.json" >"$DEPLOY_RESULT_FILE"
     echo "exported contracts to: $DEPLOY_RESULT_FILE"
@@ -122,7 +119,12 @@ else
     echo "skip deployment kurtosis enclave: $1"
   fi
 
+  # 设置 nginx
+  bash "$UPDATE_NGINX_SCRIPT" $1
+  echo "set nginx for $1"
 fi
+
+
 
 # 给一直发交易的地址转账
 # cast send --legacy --rpc-url $zkc_l2_rpc --private-key $zkc_l2_pk --value 1000ether 0x8943545177806ED17B9F23F0a21ee5948eCaa776
