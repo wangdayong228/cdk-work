@@ -104,8 +104,8 @@ if [[ "$answer" == "y" || "$answer" == "yes" ]]; then
         sudo ln -s "$CONFIG_FILE" "$LINK_FILE" || echo "创建符号链接失败，请手动执行: sudo ln -s $CONFIG_FILE $LINK_FILE"
         
         echo "提示：正在测试和重新加载Nginx配置..."
-        nginx -t  # 测试配置
-        nginx -s reload  # 重新加载Nginx
+        sudo nginx -t  # 测试配置
+        sudo nginx -s reload  # 重新加载Nginx
         echo "Nginx配置重启完成！"
     else
         echo "写入配置文件失败，请检查权限"
