@@ -39,4 +39,4 @@ fi
 export PRIVATE_KEY L1_RPC_URL polygonZkEVMBridgeAddress polygonZkEVML2BridgeAddress L1_BRIDGE_RELAY_CONTRACT L2_TYPE
 
 envsubst < "$SCRIPT_DIR/../templates/zk-claim-service-env.template" > "$OUT_DIR/zk-claim-service.env"
-envsubst < "$SCRIPT_DIR/../templates/counter-register-env.template" > "$OUT_DIR/counter-register.env"
+envsubst < "$SCRIPT_DIR/../templates/counter-bridge-register-env.template" > "$OUT_DIR/counter-bridge-register.env"
