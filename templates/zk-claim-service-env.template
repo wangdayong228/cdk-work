@@ -21,7 +21,7 @@ BRIDGE_SERVICE_URL=http://127.0.0.1/bridgeservice
 
 # ======= 自动处理 L1->L2 跨链交易使用 ======================================================
 L1_RPC_URL_REV=http://127.0.0.1/l2rpc
-L2_RPC_URL_REV=https://127.0.0.1/rpc
+L2_RPC_URL_REV=$L1_RPC_URL
 
 # polygonZkEVML2BridgeAddress
 BRIDGE_ADDRESS_REV=$polygonZkEVML2BridgeAddress

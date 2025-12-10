@@ -88,8 +88,8 @@ DEPLOY_RESULT_FILE="$SCRIPT_DIR/../output/deploy-result-$NETWORK.json"
 export L2_CONFIG=$(polycli wallet inspect --mnemonic "$L1_PREALLOCATED_MNEMONIC" --addresses 13 | jq -r '.Addresses[1:][] | [.ETHAddress, .HexPrivateKey] | @tsv' | awk 'BEGIN{split("sequencer,aggregator,claimtxmanager,timelock,admin,loadtest,agglayer,dac,proofsigner,l1testing,claimsponsor,l1_panoptichain",roles,",")} {print "  # " roles[NR] "\n  zkevm_l2_" roles[NR] "_address: \"" $1 "\""; print "  zkevm_l2_" roles[NR] "_private_key: \"0x" $2 "\"\n"}')
 [ -n "${L2_CONFIG:-}" ] || { echo "L2_CONFIG 为空"; exit 1; }
 
-export zkevm_l2_admin_private_key=$(cast wallet private-key --mnemonic "$L1_PREALLOCATED_MNEMONIC" --mnemonic-index 5)
-export zkevm_l2_admin_address=$(cast wallet address --private-key "$L2_ADMIN_PRIVATE_KEY")
+export L2_ADMIN_PRIVATE_KEY=$(cast wallet private-key --mnemonic "$L1_PREALLOCATED_MNEMONIC" --mnemonic-index 5)
+export L2_ADMIN_ADDRESS=$(cast wallet address --private-key "$L2_ADMIN_PRIVATE_KEY")
 
 export DEPLOY_PARAMETERS_SALT=0x$(openssl rand -hex 32)
 [ -n "${DEPLOY_PARAMETERS_SALT:-}" ] || { echo "DEPLOY_PARAMETERS_SALT 为空"; exit 1; }
@@ -102,24 +102,26 @@ if [ "$DRYRUN" == "true" ]; then
   echo "[dry-run] exported contracts to: $DEPLOY_RESULT_FILE"
   echo "{ \"zkevm_l2_admin_private_key\": \"0x0000000000000000000000000000000000000000000000000000000000000000\", \"zkevm_l2_admin_address\": \"0x0000000000000000000000000000000000000000\", \"polygonZkEVMBridgeAddress\": \"0x0000000000000000000000000000000000000000\", \"polygonZkEVML2BridgeAddress\": \"0x0000000000000000000000000000000000000000\"}" > $DEPLOY_RESULT_FILE
 else
-  envsubst <$TEMPLATE_FILE >$TEMP_CONFIG
-  echo "generated params file: $TEMP_CONFIG"
   # kurtosis run --cli-log-level debug -v EXECUTABLE --enclave op-eth github.com/wangdayong228/optimism-package@8d97b22f5bce73106fea4d3cc063486cca359928 --args-file "$TEMP_CONFIG" 2>&1 > "$LOG_FILE"
   if [ "$NEED_DEPLOY_CDK" == "true" ]; then
+    envsubst <$TEMPLATE_FILE >$TEMP_CONFIG
+    echo "generated params file: $TEMP_CONFIG"
     kurtosis run --cli-log-level debug -v EXECUTABLE --enclave $1 --args-file $TEMP_CONFIG github.com/Pana/kurtosis-cdk@aa5f6f39dd8fa6157abe5736d81a2c9eda1536fc 2>&1 >$LOG_FILE
+
+    # 设置 nginx
+    bash "$UPDATE_NGINX_SCRIPT" $1
+    echo "set nginx for $1"
+    # 导出合约地址
+    kurtosis service exec "$1" contracts-1 "jq '{polygonZkEVMBridgeAddress, polygonZkEVML2BridgeAddress}' /opt/zkevm/combined.json" >"$DEPLOY_RESULT_FILE"
+    echo "exported contracts to: $DEPLOY_RESULT_FILE"
+    # 导出 l2_admin_private_key
+    jq --arg k "$L2_ADMIN_PRIVATE_KEY" --arg a "$L2_ADMIN_ADDRESS" '. + {zkevm_l2_admin_private_key: $k, zkevm_l2_admin_address: $a}' "$DEPLOY_RESULT_FILE" > "$DEPLOY_RESULT_FILE.tmp"
+    mv $DEPLOY_RESULT_FILE.tmp $DEPLOY_RESULT_FILE
     echo "deployed kurtosis enclave: $1"
   else
     echo "skip deployment kurtosis enclave: $1"
   fi
-  # 设置 nginx
-  bash "$UPDATE_NGINX_SCRIPT" $1
-  echo "set nginx for $1"
-  # 导出合约地址
-  kurtosis service exec "$1" contracts-1 "jq '{polygonZkEVMBridgeAddress, polygonZkEVML2BridgeAddress}' /opt/zkevm/combined.json" >"$DEPLOY_RESULT_FILE"
-  echo "exported contracts to: $DEPLOY_RESULT_FILE"
-  # 导出 l2_admin_private_key
-  jq ".+ {"zkevm_l2_admin_private_key": "$L2_ADMIN_PRIVATE_KEY", "zkevm_l2_admin_address": "$L2_ADMIN_ADDRESS"}" $DEPLOY_RESULT_FILE > $DEPLOY_RESULT_FILE.tmp
-  mv $DEPLOY_RESULT_FILE.tmp $DEPLOY_RESULT_FILE
+
 fi
 
 # 给一直发交易的地址转账
