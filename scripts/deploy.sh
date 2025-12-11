@@ -2,6 +2,16 @@
 set -xeuo pipefail
 trap 'echo "🔴 deploy.sh 执行失败: 行 $LINENO, 错误信息: $BASH_COMMAND"; exit 1' ERR
 
+# 获取脚本所在目录
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -f $SCRIPT_DIR/params.template.yml ]; then
+  echo "错误: params.template.yml 文件不存在"
+  exit 1
+fi
+
+source "$SCRIPT_DIR/utils.sh"
+
+
 DRYRUN=${DRYRUN:-false}
 FORCE_DEPLOY_CDK=${FORCE_DEPLOY_CDK:-false}
 
@@ -70,12 +80,7 @@ if [ -z "$L1_CHAIN_ID" ] || [ -z "$L1_RPC_URL" ] || [ -z "$L1_PREALLOCATED_MNEMO
   exit 1
 fi
 
-# 获取脚本所在目录
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ ! -f $SCRIPT_DIR/params.template.yml ]; then
-  echo "错误: params.template.yml 文件不存在"
-  exit 1
-fi
+
 mkdir -p $SCRIPT_DIR/../output
 
 # 创建临时配置文件
@@ -106,8 +111,11 @@ else
   if [ "$NEED_DEPLOY_CDK" == "true" ]; then
     envsubst <$TEMPLATE_FILE >$TEMP_CONFIG
     echo "generated params file: $TEMP_CONFIG"
-    kurtosis run --cli-log-level debug -v EXECUTABLE --enclave $1 --args-file $TEMP_CONFIG github.com/Pana/kurtosis-cdk@aa5f6f39dd8fa6157abe5736d81a2c9eda1536fc 2>&1 >$LOG_FILE
 
+    echo "running kurtosis run with retry 10 times, 5 seconds interval"
+    run_with_retry 10 5 kurtosis run --cli-log-level debug -v EXECUTABLE --enclave $1 --args-file $TEMP_CONFIG github.com/Pana/kurtosis-cdk@aa5f6f39dd8fa6157abe5736d81a2c9eda1536fc 2>&1 >$LOG_FILE
+    echo "kurtosis run with retry completed"
+    
     # 导出合约地址
     kurtosis service exec "$1" contracts-1 "jq '{polygonZkEVMBridgeAddress, polygonZkEVML2BridgeAddress}' /opt/zkevm/combined.json" >"$DEPLOY_RESULT_FILE"
     echo "exported contracts to: $DEPLOY_RESULT_FILE"
