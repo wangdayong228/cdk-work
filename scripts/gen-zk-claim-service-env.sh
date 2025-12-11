@@ -35,8 +35,11 @@ if [ -z "$polygonZkEVML2BridgeAddress" ]; then
   exit 1
 fi
 
+# 创建一个助记词同时用于 L2->L1 和 L1->L2 跨链交易
+MNEMONIC=$(cast wallet new-mnemonic --json | jq -r '.mnemonic')
+
 # 导出变量供 envsubst 使用，并限定替换清单，避免替换无关环境变量
-export PRIVATE_KEY L1_RPC_URL polygonZkEVMBridgeAddress polygonZkEVML2BridgeAddress L1_BRIDGE_RELAY_CONTRACT L2_TYPE
+export PRIVATE_KEY L1_RPC_URL polygonZkEVMBridgeAddress polygonZkEVML2BridgeAddress L1_BRIDGE_RELAY_CONTRACT L2_TYPE MNEMONIC
 
 envsubst < "$SCRIPT_DIR/../templates/zk-claim-service-env.template" > "$OUT_DIR/zk-claim-service.env"
 envsubst < "$SCRIPT_DIR/../templates/counter-bridge-register-env.template" > "$OUT_DIR/counter-bridge-register.env"
