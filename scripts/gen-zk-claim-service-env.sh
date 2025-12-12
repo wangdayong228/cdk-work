@@ -2,6 +2,9 @@
 set -xEueo pipefail
 trap 'echo "命令失败: 行 $LINENO"; exit 1' ERR
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/utils.sh"
+
 if [ $# -lt 1 ]; then
   echo "错误: 请提供网络名称参数"
   echo "用法: $0 <network_name>"
@@ -18,7 +21,6 @@ fi
 NETWORK=${1#cdk-}            # 移除 "cdk-" 前缀
 NETWORK=${NETWORK//-/_} # 将 "-" 替换为 "_"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_DIR="$SCRIPT_DIR/../output"
 DEPLOY_RESULT_FILE="$OUT_DIR/deploy-result-$NETWORK.json"
 
