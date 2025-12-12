@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 run_with_retry() {
   local max_retries="$1"
   local delay_seconds="$2"
@@ -26,4 +28,13 @@ run_with_retry() {
     sleep "$delay_seconds"
     ((attempt++))
   done
+}
+
+check_template_substitution() {
+  local file="$1"
+  # shellcheck disable=SC2016  # 这里需要的是字面量模式 \${...}，而不是参数展开
+  if grep -q '\${[A-Za-z_][A-Za-z0-9_]*}' "$file"; then
+    echo "文件 $file 中仍存在未替换的模板变量，视为错误: $file" >&2
+    exit 1
+  fi
 }
