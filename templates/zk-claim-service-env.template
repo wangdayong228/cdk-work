@@ -1,8 +1,8 @@
 # ====== 私钥 ==========================================================
 # 为 MNEMONIC 的 100 个 衍生账户补充 gas
-PRIVATE_KEY=${ZK_CLAIM_SERVICE_PRIVATE_KEY}
+PRIVATE_KEY=${CLAIM_SERVICE_PRIVATE_KEY}
 # 为 MNEMONIC_REV 的 100 个 衍生账户补充 gas
-PRIVATE_KEY_REV=${ZK_CLAIM_SERVICE_PRIVATE_KEY}
+PRIVATE_KEY_REV=${CLAIM_SERVICE_PRIVATE_KEY}
 # NOTE: 自动处理 L2->L1 跨链交易使用，衍生的 100 个地址轮流在 l1 去 claim message
 MNEMONIC="${ZK_CLAIM_SERVICE_MNEMONIC}"
 # NOTE: 自动处理 L1->L2 跨链交易使用，衍生的 100 个地址轮流在 l2 去 claim message
