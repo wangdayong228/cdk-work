@@ -35,8 +35,8 @@ fi
 source $SCRIPT_DIR/l1-preallocated-mnemonics.sh
 
 # 数组长度必须大于等于 COUNT
-if [ ${#L1_PREALLOCATED_MNEMONICS[@]} -lt $COUNT ]; then
-    echo "错误: L1_PREALLOCATED_MNEMONICS 数组长度必须大于等于 COUNT"
+if [ ${#KURTOSIS_L1_PREALLOCATED_MNEMONICS[@]} -lt $COUNT ]; then
+    echo "错误: KURTOSIS_L1_PREALLOCATED_MNEMONICS 数组长度必须大于等于 COUNT"
     exit 1
 fi
 
@@ -112,8 +112,8 @@ for ip in $IPS; do
   {
     if [ -z "${REMOTE_CMD:-}" ]; then
         local l2_chain_id=$((i+10000))
-        local l1_preallocated_mnemonic=${L1_PREALLOCATED_MNEMONICS[$i]}
-        cmd="cd /home/ubuntu/cdk-work/scripts && L2_CHAIN_ID=$l2_chain_id L1_CHAIN_ID=$L1_CHAIN_ID L1_RPC_URL=$L1_RPC_URL L1_PREALLOCATED_MNEMONIC=$l1_preallocated_mnemonic ./deploy.sh cdk-gen"
+        local l1_preallocated_mnemonic=${KURTOSIS_L1_PREALLOCATED_MNEMONICS[$i]}
+        cmd="cd /home/ubuntu/cdk-work/scripts && L2_CHAIN_ID=$l2_chain_id L1_CHAIN_ID=$L1_CHAIN_ID L1_RPC_URL=$L1_RPC_URL KURTOSIS_L1_PREALLOCATED_MNEMONIC=$l1_preallocated_mnemonic ./deploy.sh cdk-gen"
     else
         cmd="$REMOTE_CMD"
     fi

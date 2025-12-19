@@ -1,1 +1,1 @@
-L2_CHAIN_ID=20000 L1_CHAIN_ID=1025 L1_RPC_URL=https://cfx-rpc-proxy-cdk.yidaiyilu0.site L1_PREALLOCATED_MNEMONIC="praise library enforce wagon picnic kiss estate duck nephew strong seat autumn" ./deploy.sh cdk-cfx-dev
+L2_CHAIN_ID=20000 L1_CHAIN_ID=1025 L1_RPC_URL=https://cfx-rpc-proxy-cdk.yidaiyilu0.site KURTOSIS_L1_PREALLOCATED_MNEMONIC="praise library enforce wagon picnic kiss estate duck nephew strong seat autumn" ./deploy.sh cdk-cfx-dev

@@ -1,1 +1,1 @@
-L2_CHAIN_ID=20002 L1_CHAIN_ID=71 L1_RPC_URL=https://cfx-testnet-cdk-rpc-proxy.yidaiyilu0.site L1_PREALLOCATED_MNEMONIC="page equal useless ocean cradle forward weekend glove hip truly cup cycle" ./deploy.sh cdk-cfx-test
+L2_CHAIN_ID=20002 L1_CHAIN_ID=71 L1_RPC_URL=https://cfx-testnet-cdk-rpc-proxy.yidaiyilu0.site KURTOSIS_L1_PREALLOCATED_MNEMONIC="page equal useless ocean cradle forward weekend glove hip truly cup cycle" ./deploy.sh cdk-cfx-test

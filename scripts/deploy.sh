@@ -75,8 +75,8 @@ if [ -z "$L2_CHAIN_ID" ]; then
   exit 1
 fi
 
-if [ -z "$L1_CHAIN_ID" ] || [ -z "$L1_RPC_URL" ] || [ -z "$L1_PREALLOCATED_MNEMONIC" ]; then
-  echo "错误: 请设置 L1_CHAIN_ID 和 L1_RPC_URL 和 L1_PREALLOCATED_MNEMONIC 环境变量"
+if [ -z "$L1_CHAIN_ID" ] || [ -z "$L1_RPC_URL" ] || [ -z "$KURTOSIS_L1_PREALLOCATED_MNEMONIC" ]; then
+  echo "错误: 请设置 L1_CHAIN_ID 和 L1_RPC_URL 和 KURTOSIS_L1_PREALLOCATED_MNEMONIC 环境变量"
   exit 1
 fi
 
@@ -90,10 +90,10 @@ LOG_FILE="$SCRIPT_DIR/deploy-$NETWORK.log"
 UPDATE_NGINX_SCRIPT="$SCRIPT_DIR/../update-nginx/update_nginx_ports.sh"
 DEPLOY_RESULT_FILE="$SCRIPT_DIR/../output/deploy-result-$NETWORK.json"
 
-export L2_CONFIG=$(polycli wallet inspect --mnemonic "$L1_PREALLOCATED_MNEMONIC" --addresses 13 | jq -r '.Addresses[1:][] | [.ETHAddress, .HexPrivateKey] | @tsv' | awk 'BEGIN{split("sequencer,aggregator,claimtxmanager,timelock,admin,loadtest,agglayer,dac,proofsigner,l1testing,claimsponsor,l1_panoptichain",roles,",")} {print "  # " roles[NR] "\n  zkevm_l2_" roles[NR] "_address: \"" $1 "\""; print "  zkevm_l2_" roles[NR] "_private_key: \"0x" $2 "\"\n"}')
+export L2_CONFIG=$(polycli wallet inspect --mnemonic "$KURTOSIS_L1_PREALLOCATED_MNEMONIC" --addresses 13 | jq -r '.Addresses[1:][] | [.ETHAddress, .HexPrivateKey] | @tsv' | awk 'BEGIN{split("sequencer,aggregator,claimtxmanager,timelock,admin,loadtest,agglayer,dac,proofsigner,l1testing,claimsponsor,l1_panoptichain",roles,",")} {print "  # " roles[NR] "\n  zkevm_l2_" roles[NR] "_address: \"" $1 "\""; print "  zkevm_l2_" roles[NR] "_private_key: \"0x" $2 "\"\n"}')
 [ -n "${L2_CONFIG:-}" ] || { echo "L2_CONFIG 为空"; exit 1; }
 
-export L2_ADMIN_PRIVATE_KEY=$(cast wallet private-key --mnemonic "$L1_PREALLOCATED_MNEMONIC" --mnemonic-index 5)
+export L2_ADMIN_PRIVATE_KEY=$(cast wallet private-key --mnemonic "$KURTOSIS_L1_PREALLOCATED_MNEMONIC" --mnemonic-index 5)
 export L2_ADMIN_ADDRESS=$(cast wallet address --private-key "$L2_ADMIN_PRIVATE_KEY")
 
 export DEPLOY_PARAMETERS_SALT=0x$(openssl rand -hex 32)
