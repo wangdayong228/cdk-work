@@ -81,7 +81,7 @@ if [ -z "$L1_CHAIN_ID" ] || [ -z "$L1_RPC_URL" ] || [ -z "$KURTOSIS_L1_PREALLOCA
 fi
 
 
-mkdir -p $SCRIPT_DIR/../output
+mkdir -p "$SCRIPT_DIR"/../output
 
 # 创建临时配置文件
 TEMPLATE_FILE="$SCRIPT_DIR/params.template.yml"
