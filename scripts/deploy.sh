@@ -8,92 +8,52 @@ DRYRUN=${DRYRUN:-false}
 FORCE_DEPLOY_CDK=${FORCE_DEPLOY_CDK:-false}
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-
-if [ ! -f "$SCRIPT_DIR"/params.template.yml ]; then
-  echo "错误: params.template.yml 文件不存在"
-  exit 1
-fi
-
 resolve_scripts_lib_dir() {
   YDYL_SCRIPTS_LIB_DIR="${YDYL_SCRIPTS_LIB_DIR:-$REPO_ROOT/ydyl-scripts-lib}"
-  if [ ! -f "$YDYL_SCRIPTS_LIB_DIR/utils.sh" ]; then
-    echo "错误: 未找到 ydyl-scripts-lib/utils.sh"
+  if [ ! -f "$YDYL_SCRIPTS_LIB_DIR/utils.sh" ] || [ ! -f "$YDYL_SCRIPTS_LIB_DIR/deploy_common.sh" ]; then
+    echo "错误: 未找到 ydyl-scripts-lib/utils.sh 或 ydyl-scripts-lib/deploy_common.sh"
     echo "请设置 YDYL_SCRIPTS_LIB_DIR 指向脚本库目录，例如: export YDYL_SCRIPTS_LIB_DIR=\"$REPO_ROOT/ydyl-scripts-lib\""
     exit 1
   fi
-  if [ ! -f "$YDYL_SCRIPTS_LIB_DIR/deploy_common.sh" ]; then
-    echo "错误: 未找到 ydyl-scripts-lib/deploy_common.sh"
-    echo "请设置 YDYL_SCRIPTS_LIB_DIR 指向脚本库目录，例如: export YDYL_SCRIPTS_LIB_DIR=\"$REPO_ROOT/ydyl-scripts-lib\""
-    exit 1
-  fi
-}
-
-load_utils() {
-  # shellcheck source=/dev/null
-  source "$YDYL_SCRIPTS_LIB_DIR/utils.sh"
-}
-
-require_tools() {
-  require_command polycli
-  require_command jq
-  require_command awk
-  require_command envsubst
-  require_command cast
-  require_command openssl
 }
 
 parse_args() {
   if [ $# -lt 1 ]; then
     echo "错误: 请提供网络名称参数"
-    echo "用法: $0 <network_name>"
+    echo "用法: $0 cdk-<network_name>"
     echo "示例: $0 cdk-eth"
     exit 1
   fi
-
-  ENCLAVE_NAME="$1"
-  if [[ "$ENCLAVE_NAME" != cdk-* ]]; then
-    echo "错误: enclave 名称必须以 cdk- 开头，例如 cdk-eth / cdk-cfx-dev / cdk-cfx-test"
-    exit 1
-  fi
-
-  # 统一使用 "-" 风格的 network（用于文件名与公共库推导 enclave）
-  NETWORK="${ENCLAVE_NAME#cdk-}"
+  ydyl_parse_enclave_and_network cdk "$1" || exit 1
 }
 
 require_env() {
-  if [ -z "${L2_CHAIN_ID:-}" ]; then
-    echo "错误: 请设置 L2_CHAIN_ID 环境变量"
-    exit 1
-  fi
-  if [ -z "${L1_CHAIN_ID:-}" ] || [ -z "${L1_RPC_URL:-}" ] || [ -z "${KURTOSIS_L1_PREALLOCATED_MNEMONIC:-}" ]; then
-    echo "错误: 请设置 L1_CHAIN_ID 和 L1_RPC_URL 和 KURTOSIS_L1_PREALLOCATED_MNEMONIC 环境变量"
+  if [ -z "${L2_CHAIN_ID:-}" ] || [ -z "${L1_CHAIN_ID:-}" ] || [ -z "${L1_RPC_URL:-}" ] || [ -z "${KURTOSIS_L1_PREALLOCATED_MNEMONIC:-}" ]; then
+    echo "错误: 请设置 L2_CHAIN_ID/L1_CHAIN_ID/L1_RPC_URL/KURTOSIS_L1_PREALLOCATED_MNEMONIC 环境变量"
     exit 1
   fi
 }
 
 prepare_paths() {
-  mkdir -p "$SCRIPT_DIR/../output"
-
-  TEMPLATE_FILE="$SCRIPT_DIR/params.template.yml"
-  TEMP_CONFIG="$SCRIPT_DIR/params-${NETWORK}.yml"
-  LOG_FILE="$SCRIPT_DIR/deploy-${NETWORK}.log"
-  UPDATE_NGINX_SCRIPT="$SCRIPT_DIR/../update-nginx/update_nginx_ports.sh"
-  DEPLOY_RESULT_FILE="$SCRIPT_DIR/../output/deploy-result-${NETWORK}.json"
+  ydyl_prepare_deploy_paths \
+    "$SCRIPT_DIR" \
+    "$NETWORK" \
+    "$SCRIPT_DIR/../output" \
+    "$SCRIPT_DIR/../update-nginx/update_nginx_ports.sh" || exit 1
 }
 
 prepare_cdk_env() {
   L2_CONFIG=$(polycli wallet inspect --mnemonic "$KURTOSIS_L1_PREALLOCATED_MNEMONIC" --addresses 13 | jq -r '.Addresses[1:][] | [.ETHAddress, .HexPrivateKey] | @tsv' | awk 'BEGIN{split("sequencer,aggregator,claimtxmanager,timelock,admin,loadtest,agglayer,dac,proofsigner,l1testing,claimsponsor,l1_panoptichain",roles,",")} {print "  # " roles[NR] "\n  zkevm_l2_" roles[NR] "_address: \"" $1 "\""; print "  zkevm_l2_" roles[NR] "_private_key: \"0x" $2 "\"\n"}')
   export L2_CONFIG
-  [ -n "${L2_CONFIG:-}" ] || { echo "L2_CONFIG 为空"; exit 1; }
 
   L2_ADMIN_PRIVATE_KEY=$(cast wallet private-key --mnemonic "$KURTOSIS_L1_PREALLOCATED_MNEMONIC" --mnemonic-index 5)
   export L2_ADMIN_PRIVATE_KEY
+
   L2_ADMIN_ADDRESS=$(cast wallet address --private-key "$L2_ADMIN_PRIVATE_KEY")
   export L2_ADMIN_ADDRESS
 
   DEPLOY_PARAMETERS_SALT=0x$(openssl rand -hex 32)
   export DEPLOY_PARAMETERS_SALT
-  [ -n "${DEPLOY_PARAMETERS_SALT:-}" ] || { echo "DEPLOY_PARAMETERS_SALT 为空"; exit 1; }
 }
 
 run_deploy() {
@@ -107,8 +67,6 @@ run_deploy() {
   export DEPLOY_DRYRUN="$DRYRUN"
   export DEPLOY_FORCE="$FORCE_DEPLOY_CDK"
 
-  # shellcheck source=/dev/null
-  source "$YDYL_SCRIPTS_LIB_DIR/deploy_common.sh"
   ydyl_kurtosis_deploy
 }
 
@@ -132,8 +90,9 @@ export_results() {
 
 main() {
   resolve_scripts_lib_dir
-  load_utils
-  require_tools
+  # shellcheck source=../../ydyl-scripts-lib/deploy_common.sh
+  source "$YDYL_SCRIPTS_LIB_DIR/deploy_common.sh"
+  require_commands polycli jq awk envsubst cast openssl
   parse_args "$@"
   require_env
   prepare_paths
