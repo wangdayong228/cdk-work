@@ -3,7 +3,15 @@ set -xEueo pipefail
 trap 'echo "命令失败: 行 $LINENO"; exit 1' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/utils.sh"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+YDYL_SCRIPTS_LIB_DIR="${YDYL_SCRIPTS_LIB_DIR:-$REPO_ROOT/ydyl-scripts-lib}"
+if [ ! -f "$YDYL_SCRIPTS_LIB_DIR/utils.sh" ]; then
+  echo "错误: 未找到 ydyl-scripts-lib/utils.sh"
+  echo "请设置 YDYL_SCRIPTS_LIB_DIR 指向脚本库目录，例如: export YDYL_SCRIPTS_LIB_DIR=\"$REPO_ROOT/ydyl-scripts-lib\""
+  exit 1
+fi
+# shellcheck source=/dev/null
+source "$YDYL_SCRIPTS_LIB_DIR/utils.sh"
 
 if [ $# -lt 1 ]; then
   echo "错误: 请提供网络名称参数"
