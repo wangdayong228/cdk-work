@@ -1,9 +1,9 @@
 #!/bin/bash
-set -xeuo pipefail
-trap 'echo "🔴 deploy.sh 执行失败: 行 $LINENO, 错误信息: $BASH_COMMAND"; exit 1' ERR
+set -xEeuo pipefail
 
 # 获取脚本所在目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 DRYRUN=${DRYRUN:-false}
 FORCE_DEPLOY_CDK=${FORCE_DEPLOY_CDK:-false}
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -92,6 +92,10 @@ main() {
   resolve_scripts_lib_dir
   # shellcheck source=../../ydyl-scripts-lib/deploy_common.sh
   source "$YDYL_SCRIPTS_LIB_DIR/deploy_common.sh"
+  if [ "${YDYL_NO_TRAP:-0}" != "1" ]; then
+    trap 'ydyl_trap_err' ERR
+    trap 'ydyl_trap_exit' EXIT
+  fi
   require_commands polycli jq awk envsubst cast openssl
   parse_args "$@"
   require_env
