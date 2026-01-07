@@ -21,8 +21,8 @@ if [ $# -lt 1 ]; then
 fi
 
 # 接受输入  L1_RPC_URL
-if [ -z "$L1_RPC_URL" ] || [ -z "$CLAIM_SERVICE_PRIVATE_KEY" ] || [ -z "$L1_BRIDGE_RELAY_CONTRACT" ] || [ -z "$L1_REGISTER_BRIDGE_PRIVATE_KEY" ] || [ -z "$L2_TYPE" ] || [ -z "$L2_PRIVATE_KEY" ]; then
-  echo "错误: 请提供 L1_RPC_URL 和 CLAIM_SERVICE_PRIVATE_KEY 和 L1_BRIDGE_RELAY_CONTRACT 和 L1_REGISTER_BRIDGE_PRIVATE_KEY 和 L2_TYPE 和 L2_PRIVATE_KEY 环境变量"
+if [ -z "$L1_RPC_URL" ] || [ -z "$CLAIM_SERVICE_PRIVATE_KEY" ] || [ -z "$L1_BRIDGE_HUB_CONTRACT" ] || [ -z "$L1_REGISTER_BRIDGE_PRIVATE_KEY" ] || [ -z "$L2_TYPE" ] || [ -z "$L2_PRIVATE_KEY" ]; then
+  echo "错误: 请提供 L1_RPC_URL 和 CLAIM_SERVICE_PRIVATE_KEY 和 L1_BRIDGE_HUB_CONTRACT 和 L1_REGISTER_BRIDGE_PRIVATE_KEY 和 L2_TYPE 和 L2_PRIVATE_KEY 环境变量"
   exit 1
 fi
 
@@ -49,7 +49,7 @@ fi
 ZK_CLAIM_SERVICE_MNEMONIC=$(cast wallet new-mnemonic --json | jq -r '.mnemonic')
 
 # 导出变量供 envsubst 使用，并限定替换清单，避免替换无关环境变量
-export PRIVATE_KEY L1_RPC_URL polygonZkEVMBridgeAddress polygonZkEVML2BridgeAddress L1_BRIDGE_RELAY_CONTRACT L2_TYPE L2_PRIVATE_KEY ZK_CLAIM_SERVICE_MNEMONIC
+export PRIVATE_KEY L1_RPC_URL polygonZkEVMBridgeAddress polygonZkEVML2BridgeAddress L1_BRIDGE_HUB_CONTRACT L2_TYPE L2_PRIVATE_KEY ZK_CLAIM_SERVICE_MNEMONIC
 
 OUT_DIR_ZK_CLAIM_SERVICE_ENV="$OUT_DIR/zk-claim-service.env"
 envsubst < "$SCRIPT_DIR/../templates/zk-claim-service-env.template" > "$OUT_DIR_ZK_CLAIM_SERVICE_ENV"
