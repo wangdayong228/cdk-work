@@ -6,7 +6,7 @@ BRIDGES=${polygonZkEVMBridgeAddress}
 L1_BRIDGE_HUB_CONTRACT=${L1_BRIDGE_HUB_CONTRACT}
 # L1 中继合约的 owner
 L1_REGISTER_BRIDGE_PRIVATE_KEY=${L1_REGISTER_BRIDGE_PRIVATE_KEY}
-# 用于部署 counter 合约
+# 用于在 L2 部署 Counter 合约（bridge 注册流程依赖）
 L2_PRIVATE_KEY=${L2_PRIVATE_KEY}
 # Layer2 类型编号（与合约约定一致，0/1/2 表示 zk/op/bridge）
 L2_TYPE=0
