@@ -152,3 +152,7 @@ Context:
 
 如何清理日志: kurtosis? docker? 或者服务自动清理?
 
+## 卡在 Validating plan and preparing container images - execution will begin shortly
+原因未知，删掉 enclave 重试就可以过去
+
+## 
