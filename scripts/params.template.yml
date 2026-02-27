@@ -27,19 +27,14 @@ args:
   zkevm_rollup_chain_id: $L2_CHAIN_ID
   deploy_parameters_salt: $DEPLOY_PARAMETERS_SALT
 
-  ## local devnet
-  # l1_chain_id: 1025
-  # l1_rpc_url: http://172.17.0.1:8545
-  ## Conflux eSpace testnet
+
   l1_chain_id: $L1_CHAIN_ID
-  # rpc vip key 到期时间 10/17/2025 11:31:32 AM
-  # l1_rpc_url: https://evmtestnet.confluxrpc.com/7mCztCVfajeGYYkWSea3Fk6ojynwUmBZ6L1ue2YTkudVfus7XkqbKnoMcYVYZYYVJSjDw73u45Nr4zHmyRLaG5x2w
   l1_rpc_url: $L1_RPC_URL
 
   # l1_ws_url: wss://cfx-espace-testnet.gateway.tenderly.co/3fHgQnAD9BSz8b6YOCIJbW
-  # 0xBB23d861A96cB0b35a1e5F2706683115B10811B2
+
   l1_preallocated_mnemonic: $KURTOSIS_L1_PREALLOCATED_MNEMONIC
-  l1_funding_amount: 20ether
+  l1_funding_amount: 150ether
 
   ## L2 Config
   $L2_CONFIG
