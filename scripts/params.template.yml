@@ -34,7 +34,7 @@ args:
   # l1_ws_url: wss://cfx-espace-testnet.gateway.tenderly.co/3fHgQnAD9BSz8b6YOCIJbW
 
   l1_preallocated_mnemonic: $KURTOSIS_L1_PREALLOCATED_MNEMONIC
-  l1_funding_amount: 150ether
+  l1_funding_amount: 1000ether
 
   ## L2 Config
   $L2_CONFIG
