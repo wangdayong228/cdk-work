@@ -16,6 +16,7 @@ args:
     # - bridge_spammer
     # - agglogger
   sequencer_type: erigon
+  erigon_strict_mode: false
   consensus_contract_type: rollup
   agglayer_contracts_image: europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/agglayer-contracts:v11.0.0-rc.2-fork.12
   zkevm_prover_image: hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12
