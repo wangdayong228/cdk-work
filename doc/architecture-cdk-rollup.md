@@ -1,0 +1,732 @@
+# 当前 CDK-Work 部署 CDK Rollup 架构图（Erigon Sequencer + Mock Prover + L1 直连）
+
+## 架构总览
+
+```mermaid
+flowchart TB
+    subgraph L1["L1 (外部链: Conflux eSpace)"]
+        subgraph L1C["L1 合约"]
+            rollupMgr["PolygonRollupManager"]
+            rollup["PolygonZkEVM<br/>(Rollup)"]
+            ger["PolygonZkEVM<br/>GlobalExitRoot"]
+            bridgeL1["PolygonZkEVMBridge<br/>(L1 Bridge)"]
+            verifier["Mock Verifier"]
+        end
+    end
+
+    subgraph L2["CDK L2 (Kurtosis Enclave: cdk-gen)"]
+        subgraph Core["核心组件"]
+            sequencer["cdk-erigon-sequencer-1<br/>────────────────<br/>交易排序/出块<br/>内部执行交易<br/>内部 txpool<br/>rpc:8123 ws:8133<br/>datastream:6900"]
+            rpc["cdk-erigon-rpc-1<br/>────────────────<br/>只读 RPC 节点<br/>提供 witness 数据<br/>rpc:8123 ws:8133"]
+            cdknode["cdk-node-1<br/>────────────────<br/>Aggregator(聚合器)<br/>AggSender(序列提交)<br/>aggregator:50081<br/>rpc:5576 rest:5577"]
+            prover["zkevm-prover-1<br/>────────────────<br/>executor:50071<br/>hash-db:50061<br/>(aggregatorClient<br/> 连 cdk-node)"]
+            poolmgr["zkevm-pool-manager-1<br/>────────────────<br/>交易池管理<br/>http:8545"]
+            bridgesvc["zkevm-bridge-service-1<br/>────────────────<br/>跨链桥中继<br/>grpc:9090 rpc:8080"]
+        end
+
+        subgraph Infra["基础设施"]
+            postgres[("postgres-1<br/>────────────────<br/>共享数据库 :5432<br/>aggregator_db<br/>bridge_db<br/>prover_db<br/>erigon_state")]
+            monitor["grafana-1 :3000<br/>prometheus-1 :9090<br/>panoptichain-1 :9090<br/>status-checker-1"]
+        end
+    end
+
+    %% ===== Sequencer 连接 =====
+    sequencer -->|"读 L1 状态<br/>zkevm.l1-rpc-url"| L1C
+    sequencer -->|"datastream :6900<br/>实时同步区块/批次"| rpc
+    sequencer -->|":5432<br/>erigon_state"| postgres
+
+    %% ===== RPC 节点连接 =====
+    rpc -->|":8545<br/>pool-manager-url<br/>转发 eth_sendRawTransaction"| poolmgr
+    rpc -->|":5432<br/>读状态"| postgres
+
+    %% ===== Pool Manager =====
+    poolmgr -->|"txpool 协调"| sequencer
+    poolmgr -->|":5432"| postgres
+
+    %% ===== CDK Node (Aggregator) =====
+    cdknode -->|":8123 HTTP<br/>WitnessURL<br/>zkevm_getWitness"| rpc
+    cdknode -->|"提交 proof + sequence<br/>SettlementBackend=l1"| L1C
+    cdknode -->|":5432<br/>aggregator_db"| postgres
+
+    %% ===== Prover =====
+    prover -->|"aggregatorClient gRPC<br/>连接 :50081<br/>(方向: prover → cdk-node)"| cdknode
+    prover -->|":5432<br/>prover_db (SMT)"| postgres
+
+    %% ===== Bridge Service =====
+    bridgesvc -->|"监听 L1 桥合约事件"| L1C
+    bridgesvc -->|":8123 HTTP<br/>监听 L2 桥合约事件"| rpc
+    bridgesvc -->|":5432<br/>bridge_db"| postgres
+
+    %% ===== 监控 =====
+    monitor -.->|"采集 metrics"| Core
+```
+
+## 数据流（交易 → 区块 → 证明 → L1 结算）
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant RPC as cdk-erigon-rpc-1<br/>(:8123)
+    participant Pool as zkevm-pool-manager-1<br/>(:8545)
+    participant Seq as cdk-erigon-sequencer-1
+    participant Node as cdk-node-1<br/>(Aggregator :50081)
+    participant Prover as zkevm-prover-1
+    participant L1 as L1 合约
+
+    Note over Seq: erigon_strict_mode=false<br/>内部执行交易<br/>不连外部 executor
+
+    rect rgb(240, 248, 255)
+        Note over User,Pool: 阶段1 — 交易提交
+        User->>RPC: eth_sendRawTransaction
+        RPC->>Pool: 转发交易 (pool-manager-url)
+        Pool->>Seq: txpool 协调
+    end
+
+    rect rgb(255, 248, 240)
+        Note over Seq,RPC: 阶段2 — 出块与同步
+        Seq->>Seq: 排序交易 → 内部执行 → 出块 → 封批次
+        Seq-->>RPC: datastream :6900 推送新区块/批次
+        RPC->>RPC: 存储区块, 对外提供 RPC 查询
+    end
+
+    rect rgb(240, 255, 240)
+        Note over Prover,Node: 阶段3 — 证明生成
+        Prover->>Node: 建立 gRPC 连接 (aggregatorClient → :50081)
+        Node->>RPC: zkevm_getWitness(batchNumber)
+        RPC-->>Node: witness 数据
+        Node->>Prover: BatchProof 请求
+        Note over Prover: mock proof<br/>(aggregatorClientMockTimeout=1μs)
+        Prover-->>Node: 递归证明
+        Node->>Prover: AggregatedProof 请求
+        Prover-->>Node: 聚合证明
+        Node->>Prover: FinalProof 请求
+        Prover-->>Node: 最终证明
+    end
+
+    rect rgb(248, 240, 255)
+        Note over Node,L1: 阶段4 — L1 结算
+        Node->>L1: sequenceBatches()
+        Node->>L1: verifyBatches(proof)
+        Note over L1: Mock Verifier 验证通过<br/>Trusted → Virtual → Verified
+    end
+```
+
+## 端口连接矩阵
+
+```mermaid
+flowchart LR
+    SEQ("cdk-erigon<br/>-sequencer-1")
+    RPC2("cdk-erigon<br/>-rpc-1")
+    NODE("cdk-node-1")
+    PROVER2("zkevm-prover-1")
+    BRIDGE("zkevm-bridge<br/>-service-1")
+
+    L1T["L1 RPC<br/>(外部)"]
+    PG[("postgres-1<br/>:5432")]
+    RPC3("cdk-erigon-rpc-1<br/>:8123")
+    NODE2("cdk-node-1<br/>:50081")
+    POOL("zkevm-pool<br/>-manager-1 :8545")
+
+    SEQ --"datastream :6900"--> RPC3
+    SEQ --"读 L1 状态"--> L1T
+    SEQ --"erigon_state"--> PG
+    RPC2 --"sendRawTransaction"--> POOL
+    RPC2 --"读状态"--> PG
+    NODE --"WitnessURL :8123"--> RPC3
+    NODE --"提交 proof + sequence"--> L1T
+    NODE --"aggregator_db"--> PG
+    PROVER2 --"aggregatorClient :50081"--> NODE2
+    PROVER2 --"prover_db"--> PG
+    BRIDGE --"监听 L1 桥事件"--> L1T
+    BRIDGE --"监听 L2 桥事件 :8123"--> RPC3
+    BRIDGE --"bridge_db"--> PG
+```
+
+## 配置差异（当前 vs 标准 ZK Rollup）
+
+```mermaid
+flowchart LR
+    subgraph Current["当前配置 (params.template.yml)"]
+        C1["deploy_agglayer: false<br/>→ L1 直连结算"]
+        C2["deploy_l1: false<br/>→ 使用外部 L1"]
+        C3["erigon_strict_mode: false<br/>→ sequencer 不连 executor"]
+        C4["zkevm_use_real_verifier: false<br/>→ mock proof"]
+        C5["deploy_optimism_rollup: false<br/>→ 不部署 OP Stack"]
+    end
+
+    subgraph Standard["标准 ZK Rollup (rollup.yml)"]
+        S1["deploy_agglayer: true<br/>→ Agglayer 结算"]
+        S2["deploy_l1: true<br/>→ 部署本地 L1"]
+        S3["erigon_strict_mode: true<br/>→ sequencer 连 executor"]
+        S4["zkevm_use_real_verifier: false<br/>→ mock proof (相同)"]
+        S5["deploy_optimism_rollup: true<br/>→ CDK + OP Stack"]
+    end
+
+    Current --- Standard
+```
+
+## 验证清单
+
+每条连接的配置来源均可追溯：
+
+| # | 连接 | 配置来源 | 文件:行号 |
+|---|------|---------|-----------|
+| 1 | sequencer → L1 (读状态) | `zkevm.l1-rpc-url` | `cdk-erigon/config.yml:452` |
+| 2 | sequencer → rpc (datastream) | `zkevm.data-stream-port` | `cdk-erigon/config.yml:229-233` |
+| 3 | sequencer 不连 executor | `zkevm.executor-urls` 在 `{{if .erigon_strict_mode}}` 内 | `cdk-erigon/config.yml:360-367` |
+| 4 | rpc → pool-manager (转发tx) | `zkevm.pool-manager-url` 仅非sequencer | `cdk-erigon/config.yml:182-187` |
+| 5 | cdk-node → rpc (witness) | `WitnessURL` | `cdk-node-config.toml:33` |
+| 6 | cdk-node → L1 (结算) | `SettlementBackend` + `L1URL` | `cdk-node-config.toml:2,59` |
+| 7 | cdk-node → L1 直连原因 | `deploy_agglayer=false` → `settlement_backend="l1"` | `cdk_central_environment.star:51-53` |
+| 8 | prover → cdk-node (client) | `aggregatorClientHost:Port` | `prover-config.json:151-155` |
+| 9 | cdk-node ← prover (server) | `[Aggregator] Port` | `cdk-node-config.toml:55` |
+| 10 | prover mock 模式 | `runAggregatorClientMock:true` | `prover-config.json:84` |
+| 11 | prover → postgres | `databaseURL` | `prover-config.json:178` |
+| 12 | cdk-node → postgres | `[Aggregator.DB]` | `cdk-node-config.toml:60-67` |
+
+---
+
+# zkevm-prover 架构详解
+
+## 总览
+
+`zkevm-prover` 是一个 C++ 单二进制项目（产物 `zkProver`），通过 JSON 配置中的布尔标志控制启动哪些组件。结构总览（来自源码 `src/main.cpp:56-81` 注释）：
+
+```
+Prover (可独立作为 gRPC 服务)
+ |\
+ | Executor (可独立作为 gRPC 服务) —— 端口 50071
+ | |\
+ | | Main State Machine → Binary, Memory, Storage,
+ | | Keccak, Poseidon...
+ |  \
+ |   State DB (可独立作为 gRPC 服务) —— 端口 50061
+ |    \
+ |     SMT (稀疏 Merkle 树) → PostgreSQL/SQLite
+ |\
+ | Stark → Circom (证明生成流水线)
+ |
+AggregatorClient (gRPC 客户端 → cdk-node:50081)
+```
+
+**三个核心组件**，由一个二进制通过 JSON 配置标志控制。声明在 `src/config/config.hpp:17-31`，默认值在 `src/config/config.cpp:118-125`：
+
+| 标志 | 默认值 | 作用 | 源文件:行号 |
+|------|-------|------|-----------|
+| `runExecutorServer` | `true` | 启动 Executor gRPC **服务端**（被 sequencer 调用） | `config.hpp:17`, `config.cpp:118` |
+| `runHashDBServer` | `true` | 启动 HashDB gRPC **服务端**（提供 SMT 状态） | `config.hpp:20`, `config.cpp:121` |
+| `runAggregatorClient` | `false` | 启动聚合器 gRPC **客户端**（连接外部 cdk-node，生成真实证明） | `config.hpp:23`, `config.cpp:124` |
+| `runAggregatorClientMock` | `false` | 启动 mock 聚合器客户端（生成假证明） | `config.hpp:24`, `config.cpp:125` |
+
+## Executor（端口 50071）
+
+**gRPC 服务端**，暴露 `ExecutorService`（`src/grpc/proto/executor.proto:9`）：
+
+```protobuf
+service ExecutorService {
+    rpc ProcessBatch(ProcessBatchRequest) returns (ProcessBatchResponse);
+    rpc ProcessBatchV2(ProcessBatchRequestV2) returns (ProcessBatchResponseV2);
+    rpc ProcessStatelessBatchV2(ProcessStatelessBatchRequestV2) returns (ProcessBatchResponseV2);
+}
+```
+
+**作用**：接收一批 L2 交易作为输入，通过 14 个内部状态机（Main SM、Storage SM、Keccak-f SM 等）运行 zkEVM ROM，计算：
+- 结果状态根（state root）
+- Gas 消耗
+- 交易回执
+- 执行 trace（多项式承诺）
+
+**执行器不生成任何 ZK 证明**。它是纯计算引擎——EVM 级别的交易执行。证明由 Stark → Circom 流水线在 executor 产出 trace 之后另行生成。
+
+**谁调用它**：cdk-node 的 sequencer 组件，在出块时为每个待处理的交易调用 `ProcessBatch()` 做 gas 估算和状态计算。端口默认 `50071`，配置项 `executorServerPort`（`config.hpp:75`, `config.cpp:184`）。
+
+**HashDB 依赖**：Executor 执行时需要读写 Sparse Merkle Tree 状态。通过 `hashDBURL` 决定访问方式（`config.hpp:85`, `config.cpp:192`，默认 `"local"`）：
+- `"local"` → 进程内直接调用 HashDB 类（性能最优）
+- `"host:port"` → 通过 gRPC 远程访问（独立部署场景）
+
+## HashDB / StateDB（端口 50061）
+
+**gRPC 服务端**，暴露 `HashDBService`（`src/grpc/proto/hashdb.proto:23`），提供：
+- `Set/Get`：读写 SMT 节点（账户状态：余额、nonce、存储槽）
+- `SetProgram/GetProgram`：存储/读取合约字节码（以 `hash(bytecode)` 索引）
+- `LoadDB`：加载输入数据库（批次开始前）
+- `Flush`：刷新脏数据到持久化存储（批次结束后）
+- `GetLatestStateRoot`、`StartBlock`、`FinishBlock` 等
+
+**后端存储**由 `databaseURL` 配置决定（`config.hpp:175`, `config.cpp:278`）：
+- `"local"` → 内存 SQLite（默认，stateless 模式）
+- `"postgresql://..."` → 外部 PostgreSQL（有状态模式）
+
+**配置项**（均在 `src/config/config.hpp` / `config.cpp`）：
+
+| 配置 | 默认值 | 说明 | 源文件:行号 |
+|------|-------|------|-----------|
+| `dbMTCacheSize` | 8GB | Merkle Tree 节点缓存 | `config.cpp:167` |
+| `dbProgramCacheSize` | 1GB | 合约字节码缓存 | `config.cpp:181` |
+| `maxHashDBThreads` | 8 | gRPC 线程池上限 | `config.cpp:302` |
+| `stateManager` | `true` | 批次间状态合并，避免写入膨胀 | `config.cpp:293` |
+
+## AggregatorClient
+
+**关键设计：这是一个 gRPC 客户端，不是服务端。** 它连接到在 cdk-node 内部运行的 aggregator 服务器（端口 50081）。
+
+通信协议（`src/grpc/proto/aggregator.proto:17`）：
+
+```protobuf
+service AggregatorService {
+    rpc Channel(stream ProverMessage) returns (stream AggregatorMessage);
+}
+```
+
+这是一个**双向流（bidirectional stream）**，遵循**拉取模型（pull model）**：
+1. AggregatorClient **主动**连接到 `aggregatorClientHost:aggregatorClientPort`
+2. cdk-node 的 aggregator 通过这个流发送证明请求
+3. prover 算完后通过同一个流回传结果
+
+配置字段（声明 `config.hpp:90-95`，默认值 `config.cpp:195-199`）：
+
+| 配置 | 默认值 | 说明 | 源文件:行号 |
+|------|-------|------|-----------|
+| `aggregatorClientHost` | `"127.0.0.1"` | cdk-node aggregator 的**单个**主机名 | `config.cpp:196` |
+| `aggregatorClientPort` | `50081` | aggregator 端口 | `config.cpp:195` |
+| `aggregatorClientMaxStreams` | `0`（无限制） | 并发双向流数 | `config.cpp:199` |
+| `aggregatorClientWatchdogTimeout` | 60s | 连接空闲超时 | `config.cpp:198` |
+
+**重要限制**：`aggregatorClientHost` 是单一 `string` 而非数组，一个 prover 进程只能连接**一个** cdk-node aggregator。多链共享需要起多个 prover 进程（共享基础常量文件）。
+
+## 与外部系统交互——两条独立通道
+
+```
+cdk-erigon-sequencer ──gRPC──→ Executor (:50071)
+    ProcessBatch() 执行交易、估算 gas、计算状态根
+    批次构建阶段，不涉及证明
+
+cdk-node aggregator (Go) ──gRPC── AggregatorClient (:50081，prover 主动连接)
+    双向流 Channel() 发送证明请求
+    cdk-node 的 aggregator 负责：
+    1. 监控 L1 上需要证明的批次
+    2. 向 prover 请求 GenBatchProof
+    3. 聚合多个批次 → GenAggregatedProof
+    4. 生成最终 Groth16 证明 → GenFinalProof
+    5. 调用 L1 PolygonZkEVM 合约提交证明
+```
+
+> 注：erigon 模式下，sequencer 在 `cdk-erigon` 中（非 `cdk-node`）。`cdk-node` 内置 aggregator（通过 `--components=...,aggregator` 启用），是证明流程的**编排器**，prover 是**工作节点**。
+
+## 证明流水线（Stark → Circom → Groth16）
+
+executor 产出执行 trace 后，证明生成走以下流水线：
+
+```
+执行 trace → Stark 证明 → StarkC12a → Recursive1 (batch proof)
+                                       → Recursive2 (aggregated proof)
+                                       → RecursiveF + Groth16 (final proof)
+```
+
+**Executor + HashDB = 执行系统**（做 EVM 计算），**Stark/Circom = 证明系统**（做数学证明）。两者在代码层面独立，executor 的输出是 Stark 的输入。
+
+## 当前部署中的服务划分
+
+以当前 `erigon_strict_mode: false` 为例：
+
+| Kurtosis 服务 | 跑的组件 | 关键配置 | 配置文件 |
+|-------------|---------|---------|---------|
+| `zkevm-prover-001` | Executor + HashDB **+** AggregatorClientMock | `runExecutorServer: true`, `runHashDBServer: true`, `runAggregatorClientMock: true` | `prover-config.json` |
+| `cdk-node-001` | 内置 Aggregator（服务端）+ SequenceSender | `--components=sequence-sender,aggregator` | `cdk-node-config.toml` |
+| `cdk-erigon-sequencer-001` | Sequencer（内部执行交易，**不调外部 executor**） | `zkevm.executor-strict: false` | `cdk-erigon/config.yml` |
+
+当 `erigon_strict_mode: true` 时，还会额外部署 `zkevm-stateless-executor-001`（见下方"Stateless Executor 部署条件"）。
+
+## Stateless Executor 部署条件
+
+`zkevm-stateless-executor` 只在 `erigon_strict_mode: true` 时部署（`kurtosis-cdk/cdk_erigon.star:6-27`）：
+
+```python
+if args["erigon_strict_mode"]:
+    stateless_configs["stateless_executor"] = True
+    ...
+    zkevm_prover_package.start_stateless_executor(...)
+```
+
+服务名格式：`"zkevm-" + type + args["deployment_suffix"]`（`lib/zkevm_prover.star:37`），type 为 `"stateless-executor"` 时得到 `zkevm-stateless-executor-001`。
+
+sequencer 配置侧（`cdk-erigon/config.yml:360-367`）：
+
+```yaml
+zkevm.executor-strict: {{.erigon_strict_mode}}
+{{if .erigon_strict_mode}}
+zkevm.executor-urls: zkevm-stateless-executor{{.deployment_suffix}}:{{.zkevm_executor_port}}
+{{end}}
+```
+
+| `erigon_strict_mode` | 独立 Stateless Executor | Executor 位置 | Sequencer 行为 |
+|---------------------|------------------------|--------------|--------------|
+| `false`（当前） | ❌ 不部署 | `zkevm-prover-001` 进程内（idle） | 内部执行交易 |
+| `true` | ✅ 部署 | 独立 `zkevm-stateless-executor-001` | 调用外部 executor 验证 |
+
+## 硬件要求
+
+### CPU
+
+| 要求 | 级别 | 证据 | 文件:行号 |
+|------|------|------|-----------|
+| AVX2 | **必须** | `CXXFLAGS := ... -mavx2` 写死在编译选项 | `zkevm-prover/Makefile:31` |
+| AVX512F | 推荐 | 编译时通过 `/proc/cpuinfo` 自动检测 AVX-512 | `zkevm-prover/Makefile:52-61` |
+| 不需 GPU | — | Docker 镜像用 CPU 构建产物 `zkProver`，非 `zkProverGpu` | `zkevm-prover/Dockerfile:21` |
+
+启动时打印当前模式（`src/main.cpp:337-342`）：
+
+```cpp
+#ifdef __AVX512__
+    zklog.info("Vectorization based on AVX512");
+#else
+    zklog.info("Vectorization based on AVX2");
+#endif
+```
+
+版本号也区分（`src/config/version.hpp:6-9`）：带 AVX512 编译时后缀 `v8.0.0-RC16.avx512`。
+
+支持 AVX2 的 CPU：Intel Haswell (2013+) / AMD Excavator (2015+) — 几乎所有服务器都满足。
+支持 AVX512F 的 CPU：Intel Skylake-X (2017+) / AMD Zen 4 (2022+)，证明生成速度大幅提升。
+
+### 内存
+
+| 组件 | 估计用量 | 能否跨进程共享 | 源文件:行号 |
+|------|---------|-------------|-----------|
+| 常量多项式（mmap 文件） | ~200-300GB（解压后 ~115GB 磁盘） | ✅ OS `mmap` `MAP_PRIVATE` 共享物理页 | `utils.cpp:382` |
+| DB MT Cache (`dbMTCacheSize`) | 默认 8GB/进程 | ❌ | `config.cpp:167` |
+| DB Program Cache (`dbProgramCacheSize`) | 默认 1GB/进程 | ❌ | `config.cpp:181` |
+| Stark 证明工作区 | 数百GB | ❌ | — |
+| **总计**（单进程） | **512-700GB** | |
+
+**多进程共享**：常量多项式在磁盘上约 115GB（`tools/download_archive.sh` 下载），通过 `mmap` 映射到虚拟内存后约 200-300GB，多个进程 mmap 同一个只读文件时操作系统共享同一份物理内存页。因此多进程总内存 ≈ 共享常量 + N × 每进程工作区。
+
+### 核心数
+
+无硬性最低要求。证明计算通过 OpenMP（`-fopenmp`）并行化，默认使用所有可用核心（`omp_get_num_procs()`）。实际瓶颈是内存，32-64 核服务器足够。
+
+## 多链共享分析
+
+| 组件 | 端口 | 能否跨链共享 | 原因 |
+|------|------|------------|------|
+| Executor (stateless) | 50071 | 技术上可以，但不推荐 | 无状态且链无关，但 sequencer 频繁低延迟调用，多链共享会竞争 `maxExecutorThreads`；每链独立部署更可靠 |
+| HashDB | 50061 | ❌ | 存储链特定的 Sparse Merkle Tree 状态 |
+| AggregatorClient | 50081（连出） | ❌ | 单一 `aggregatorClientHost` 字段，一个进程只能连一个 cdk-node aggregator；aggregator 绑定特定的 L1 `PolygonZkEVM` 合约 |
+
+**实际多链方案**：
+- Executor 每链独立部署（轻量，无需大内存，sequencer 频繁低延迟调用不应跨链竞争）
+- AggregatorClient 每链独立：每个链起一个 prover 进程，各连各的 cdk-node aggregator
+- 多进程同机运行：常量文件通过 OS mmap 共享，每进程各自占用工作内存
+
+---
+
+# 方案一：Prover 独立部署，启用真实 ZK 证明
+
+## 架构变化
+
+启用真实 prover 后，zkevm-prover 从 Kurtosis enclave 内移到独立的高内存机器上：
+
+```mermaid
+flowchart TB
+    subgraph L1["L1 (外部链)"]
+        L1C["L1 合约<br/>(Real Verifier 替换 Mock Verifier)"]
+    end
+
+    subgraph Kurtosis["Kurtosis Enclave (cdk-gen)"]
+        SEQ["cdk-erigon-sequencer-1"]
+        RPC["cdk-erigon-rpc-1"]
+        NODE["cdk-node-1<br/>Aggregator :50081"]
+        POOL["zkevm-pool-manager-1"]
+        BRIDGE["zkevm-bridge-service-1"]
+        PG[("postgres-1 :5432")]
+    end
+
+    subgraph ExtProver["独立高内存机器 (700GB+ RAM)"]
+        PROVER["zkevm-prover<br/>────────────────<br/>executor :50071 (仅 strict_mode)<br/>hash-db :50061<br/>aggregatorClient → cdk-node"]
+        PROVER_DB[("prover_db<br/>PostgreSQL")]
+    end
+
+    SEQ -->|"datastream :6900"| RPC
+    SEQ -->|"读 L1 状态"| L1C
+    RPC -->|"sendRawTransaction :8545"| POOL
+    POOL -->|"txpool 协调"| SEQ
+    NODE -->|"WitnessURL :8123"| RPC
+    NODE -->|"提交 proof + sequence"| L1C
+    BRIDGE -->|"监听 L1 桥事件"| L1C
+    BRIDGE -->|"监听 L2 桥事件"| RPC
+
+    PROVER -->|"aggregatorClient gRPC<br/>→ NODE_HOST:32785"| NODE
+    PROVER -->|":5432"| PROVER_DB
+    SEQ -->|"executor-urls :50071<br/>(仅 strict_mode=true)"| PROVER
+
+    SEQ -->|":5432"| PG
+    RPC -->|":5432"| PG
+    NODE -->|":5432"| PG
+    POOL -->|":5432"| PG
+    BRIDGE -->|":5432"| PG
+```
+
+**关键变化：**
+
+| 变化点 | Mock 模式 | Real Prover 模式 |
+|--------|----------|-----------------|
+| zkevm-prover 位置 | Kurtosis 内 `zkevm-prover-1` | 独立机器，不在 Kurtosis 内 |
+| prover 启动方式 | Kurtosis 自动启动 | 手动 docker run / systemd |
+| `runAggregatorClientMock` | `true` | `false` |
+| `runAggregatorClient` | `false` | `true` |
+| L1 Verifier 合约 | Mock Verifier | Real Verifier |
+| 证明时间 | 1μs (mock) | 数分钟 (真实) |
+| 硬件需求 | 普通 | CPU: AVX2 (必须) / AVX512 (推荐)<br/>内存: 512-700GB+ RAM<br/>**不需 GPU** |
+| 证明流水线 | AggregatorClientMock → 假证明 | AggregatorClient → Executor →<br/>Stark → Circom → Groth16 |
+
+## 实施步骤
+
+### 步骤 1：修改部署参数
+
+**文件**: `cdk-work/scripts/params.template.yml`
+
+```yaml
+args:
+  zkevm_use_real_verifier: true    # 新增：启用真实验证器
+  erigon_strict_mode: true         # 可选：让 sequencer 等待 executor 外部验证
+  # ... 其余保持不变
+```
+
+**代码证据** — `zkevm_use_real_verifier` 的两处关键作用：
+
+| 作用 | 文件:行号 | 代码 |
+|------|-----------|------|
+| 跳过 Kurtosis 内 prover 启动 | `kurtosis-cdk/cdk_central_environment.star:30-37` | `if (not args["zkevm_use_real_verifier"] ...): start_prover(...)` |
+| 默认值定义 | `kurtosis-cdk/input_parser.star:316` | `"zkevm_use_real_verifier": False` |
+| 注释说明需要大量内存 | `kurtosis-cdk/input_parser.star:313-316` | `# By default a mock verifier is deployed. Change to true to deploy a real verifier which will require a real prover. Note: This will require a lot of memory to run!` |
+
+**`erigon_strict_mode` 的作用**（可选开启）：
+
+| 作用 | 文件:行号 | 代码 |
+|------|-----------|------|
+| 控制 executor-urls 是否渲染 | `kurtosis-cdk/templates/cdk-erigon/config.yml:360-367` | `zkevm.executor-strict: {{.erigon_strict_mode}}` + `{{if .erigon_strict_mode}}zkevm.executor-urls: ...{{end}}` |
+| 默认值定义 | `kurtosis-cdk/input_parser.star:321` | `"erigon_strict_mode": True` |
+| 注释说明 | `kurtosis-cdk/input_parser.star:319-321` | `# This flag will enable a stateless executor to verify the execution of the batches.` |
+
+### 步骤 2：确认 Kurtosis 部署跳过 Prover
+
+设置 `zkevm_use_real_verifier: true` 后，`cdk_central_environment.star:30-37` 的条件判断 `not args["zkevm_use_real_verifier"]` 为 `false`，整个 `start_prover(...)` 块被跳过。
+
+部署后的 Kurtosis 服务列表将**不再包含** `zkevm-prover-1`：
+
+```
+# 预期服务列表（与当前对比）
+当前:  zkevm-prover-1  executor:50071, hash-db:50061   ← 会被移除
+       cdk-node-1       aggregator:50081                ← 保留，等待外部 prover 连接
+       其余服务不变
+```
+
+### 步骤 3：创建 Prover 配置文件 (`config.json`)
+
+你要创建一个 JSON 配置文件，prover 启动时通过 `-c <path>` 加载（默认查找 `config/config.json`）。
+
+**参考模板**（带完整注释的每一个字段）：
+- `kurtosis-cdk/templates/trusted-node/prover-config.json`
+- `cdk/test/config/test.prover.config.json`（真实模式示例）
+
+下面是一个**可直接使用的最小真实 prover 配置**，`< >` 标注的 3 个值需要你根据实际环境填入：
+
+```json
+{
+    "runExecutorServer": true,             // 保留：sequencer 调 executor 需要（开启 strict_mode 时）
+    "runHashDBServer": true,               // 保留：提供 SMT 状态访问
+    "runAggregatorClient": true,           // ★ 启动真实证明生成
+    "runAggregatorClientMock": false,      // ★ 关闭假证明
+
+    "aggregatorClientHost": "<CDK_NODE_IP_OR_HOSTNAME>",  // ★ 填 cdk-node 所在主机 IP
+    "aggregatorClientPort": <CDK_NODE_AGGREGATOR_PORT>,   // ★ 填 cdk-node 的 aggregator 对外端口（如 32785）
+
+    "proverName": "real-prover",           // 自定义名称，cdk-node 日志中可见
+
+    "databaseURL": "local",                // 先用 "local" 验证连通性；生产改为 PostgreSQL 连接串
+    "dbMTCacheSize": 8192,                 // 8GB
+    "dbProgramCacheSize": 1024,            // 1GB
+
+    "maxExecutorThreads": 20,
+    "maxHashDBThreads": 8,
+
+    "hashDBServerPort": 50061,
+    "executorServerPort": 50071,
+
+    "executeInParallel": true,
+    "useMainExecGenerated": true,
+    "stateManager": true
+}
+```
+
+**字段说明**（按你关心的顺序）：
+
+| 字段 | 你要填什么 | 默认值 | 源码出处 |
+|------|----------|-------|---------|
+| `aggregatorClientHost` | ★ cdk-node 所在主机的 IP 或 Docker 容器名 | `"127.0.0.1"` | `config.cpp:196` |
+| `aggregatorClientPort` | ★ cdk-node aggregator 的对外端口（非容器内 50081，是主机映射端口） | `50081` | `config.cpp:195` |
+| `databaseURL` | `"local"` = 内存 SQLite（无需外部 DB）；生产填 PostgreSQL 连接串 | `"local"` | `config.cpp:278` |
+| `runAggregatorClient` | `true` 启用真实证明生成 | `false` | `config.cpp:124` |
+| `runAggregatorClientMock` | `false` 关闭假证明 | `false` | `config.cpp:125` |
+| `proverName` | 任意字符串，用于在 cdk-node 日志中识别此 prover | `"UNSPECIFIED"` | `config.cpp:305` |
+| `runExecutorServer` | `true`（sequencer 调 executor 需要） | `true` | `config.cpp:118` |
+| `runHashDBServer` | `true`（提供 HashDB gRPC 服务） | `true` | `config.cpp:121` |
+| `maxExecutorThreads` | gRPC executor 线程池，可按 CPU 核数调整 | `20` | `config.cpp:299` |
+| `maxHashDBThreads` | gRPC HashDB 线程池 | `8` | `config.cpp:302` |
+| `dbMTCacheSize` | Merkle Tree 缓存 (MB) | `8192` | `config.cpp:167` |
+| `dbProgramCacheSize` | 合约字节码缓存 (MB) | `1024` | `config.cpp:181` |
+| `stateManager` | 批次间状态合并 | `true` | `config.cpp:293` |
+| `executeInParallel` | 并行执行辅助状态机 | `true` | `config.cpp:153` |
+
+> **提醒**：prover 连接 cdk-node 的方向是 **prover → cdk-node**（`AggregatorClient` 是客户端），因此 `aggregatorClientHost/Port` 要填 cdk-node 的网络地址，不是 prover 自己的地址。
+
+### 步骤 4：准备 Prover 数据库
+
+**文件**: `kurtosis-cdk/templates/databases/prover-db-init.sql`
+
+在独立机器上创建 PostgreSQL 数据库并执行初始化脚本。该脚本创建：
+
+- `state.nodes` 表 — 存储 Sparse Merkle Tree 节点
+- `state.program` 表 — 存储智能合约字节码
+
+```bash
+createdb prover_db
+psql -d prover_db -f prover-db-init.sql
+```
+
+### 步骤 5：启动外部 Prover
+
+**前置条件**：硬件要求见上方 [硬件要求](#硬件要求) 章节（AVX2 必须、AVX512 推荐、512-700GB RAM、不需 GPU）。
+
+**Docker 启动参考** — `cdk/test/docker-compose.yml:20-28`（唯一的手动启动示例）：
+
+```bash
+docker run -d \
+  --name zkevm-prover \
+  -v /path/to/real-prover-config.json:/usr/src/app/config.json \
+  -v /path/to/prover-data:/app/config \
+  hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12 \
+  zkProver -c /usr/src/app/config.json
+```
+
+**镜像版本来源**：
+
+| 来源 | 镜像 | 文件:行号 |
+|------|------|-----------|
+| 你的当前部署 | `hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12` | `cdk-work/scripts/params.template.yml:22` |
+| kurtosis-cdk 默认 | `hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12` | `kurtosis-cdk/input_parser.star:72` |
+| CDK versions.json | `hermeznetwork/zkevm-prover:v8.0.0-RC14-fork.12` | `cdk/crates/cdk/versions.json:13` |
+
+**Kurtosis 内启动逻辑参考** — `kurtosis-cdk/lib/zkevm_prover.star:38-52`：
+
+```python
+# 所有模式使用同一镜像，通过 config 区分 prover/executor/stateless-executor
+image=args["zkevm_prover_image"],
+cmd=['/usr/local/bin/zkProver -c /etc/zkevm/{type}-config.json']
+```
+
+### 步骤 6：配置网络连通性
+
+这是方案一最关键的步骤。Prover 需要访问 cdk-node 的 aggregator 端口。
+
+**问题**：Kurtosis 内服务使用 Docker 内部 DNS（如 `cdk-node-1`），外部机器无法直接解析。
+
+**当前端口映射**（来自你的实际部署）：
+
+```
+cdk-node-1: aggregator: 50081/tcp -> grpc://127.0.0.1:32785
+```
+
+**方案 A — 同一 Docker 网络**（推荐，最简单）：
+
+将 prover 容器挂载到 Kurtosis enclave 的 Docker 网络，可直接使用内部 DNS：
+
+```bash
+# 1. 查找 Kurtosis 创建的 Docker 网络
+docker network ls | grep kurtosis
+
+# 2. 启动 prover 时指定该网络
+docker run -d \
+  --network $(docker network ls -q -f name=kt-) \
+  --name zkevm-prover \
+  -v /path/to/real-prover-config.json:/usr/src/app/config.json \
+  hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12 \
+  zkProver -c /usr/src/app/config.json
+```
+
+此时 `aggregatorClientHost` 可以直接使用 `"cdk-node-1"`，端口使用容器内端口 `50081`。
+
+**方案 B — 主机端口映射**：
+
+如果 prover 在另一台机器上，需要确保 cdk-node 的 aggregator 端口对外可达：
+
+1. 确认 Kurtosis 动态端口映射到 `0.0.0.0` 而非 `127.0.0.1`
+2. 在 prover 配置中使用主机 IP + 映射端口
+3. 配置防火墙放行
+
+**方案 C — SSH 隧道**：
+
+在 prover 机器上建立到 cdk-node 的 SSH 隧道：
+
+```bash
+ssh -L 50081:localhost:32785 user@cdk-node-host -N
+```
+
+然后 prover 配置中 `aggregatorClientHost: "127.0.0.1"`, `aggregatorClientPort: 50081`。
+
+### 步骤 7：处理 erigon_strict_mode（可选）
+
+如果同时开启了 `erigon_strict_mode: true`，sequencer 需要在出块前等待 executor 的外部验证。详解见上方 [Stateless Executor 部署条件](#stateless-executor-部署条件)。
+
+如果外部 prover 不在同一 Docker 网络（方案 A），需要修改 fork 的模板让 executor 地址可配置（模板写死了 `zkevm-stateless-executor-1:50071`），或者采用方案 A 让 Docker DNS 解析生效。
+
+### 步骤 8：部署并验证
+
+```bash
+# 1. 重新部署 CDK（prover 不再在 Kurtosis 内启动）
+bash cdk_pipe.sh
+
+# 2. 确认 cdk-node 的 aggregator 端口映射
+kurtosis port print cdk-gen cdk-node-1 aggregator
+
+# 3. 启动外部 prover
+docker run -d --name zkevm-prover ... 
+
+# 4. 检查 prover 日志，确认连接 aggregator 成功
+docker logs -f zkevm-prover
+# 预期日志: "Connected to aggregator" / "Waiting for proof requests"
+
+# 5. 检查 cdk-node 日志，确认收到 prover 连接
+kurtosis service logs cdk-gen cdk-node-1
+# 预期: aggregator_current_connected_provers 指标 > 0
+
+# 6. 观察 proof 生成
+cast rpc --rpc-url $L2_RPC zkevm_verifiedBatchNumber
+# 应该随时间增长（不再卡住）
+```
+
+## 步骤汇总与代码证据索引
+
+| 步骤 | 操作 | 关键文件 | 关键配置/行号 |
+|------|------|---------|-------------|
+| 1 | 修改部署参数 | `params.template.yml` | 新增 `zkevm_use_real_verifier: true` |
+| 1 | 参数默认值 | `input_parser.star` | 316 |
+| 1 | 参数注释（需要大量内存） | `input_parser.star` | 313-316 |
+| 2 | prover 跳过启动的条件 | `cdk_central_environment.star` | 30-37 |
+| 3 | prover 配置模板（带注释） | `prover-config.json` | 全文 |
+| 3 | 真实模式示例 | `cdk/test/config/test.prover.config.json` | 全文 |
+| 3 | ★ `aggregatorClientHost` | `config.cpp:196` | 填 cdk-node 主机 IP |
+| 3 | ★ `aggregatorClientPort` | `config.cpp:195` | 填 cdk-node aggregator 对外端口 |
+| 3 | `runAggregatorClient` | `config.cpp:124` | → `true` |
+| 3 | `runAggregatorClientMock` | `config.cpp:125` | → `false` |
+| 3 | `databaseURL` | `config.cpp:278` | 先用 `"local"`，生产改 PostgreSQL |
+| 4 | prover DB 初始化 SQL | `templates/databases/prover-db-init.sql` | 全文 |
+| 5 | Docker 启动命令参考 | `test/docker-compose.yml` | 20-28 |
+| 5 | prover 镜像版本 | `params.template.yml` / `input_parser.star` | 22 / 72 |
+| 5 | Kurtosis 启动逻辑 | `lib/zkevm_prover.star` | 38-52 |
+| 6 | 网络连通（当前映射示例） | 实际 enclave inspect 输出 | — |
+| 7 | strict_mode executor-urls 条件 | `templates/cdk-erigon/config.yml` | 360-367 |
+| 7 | strict_mode 默认值 | `input_parser.star` | 319-321 |
+| 8 | aggregator 端口 | `cdk-node-config.toml` | 55 |
+| 8 | aggregator DB 配置 | `cdk-node-config.toml` | 60-67 |
+| 8 | WitnessURL 配置 | `cdk-node-config.toml` | 33 |
