@@ -292,7 +292,7 @@ service AggregatorService {
 | `aggregatorClientMaxStreams` | `0`（无限制） | 并发双向流数 | `config.cpp:199` |
 | `aggregatorClientWatchdogTimeout` | 60s | 连接空闲超时 | `config.cpp:198` |
 
-**重要限制**：`aggregatorClientHost` 是单一 `string` 而非数组，一个 prover 进程只能连接**一个** cdk-node aggregator。多链共享需要起多个 prover 进程（共享基础常量文件）。
+**重要限制**：`aggregatorClientHost` 是单一 `string` 而非数组，一个 prover 进程只能连接**一个** cdk-node aggregator。多链场景下每链需要独立的 prover 进程（每进程一台机器，见下方[多链共享分析](#多链共享分析)）。
 
 ## 与外部系统交互——两条独立通道
 
@@ -416,7 +416,7 @@ zkevm.executor-urls: zkevm-stateless-executor{{.deployment_suffix}}:{{.zkevm_exe
 **实际多链方案**：
 - Executor 每链独立部署（轻量，无需大内存，sequencer 频繁低延迟调用不应跨链竞争）
 - AggregatorClient 每链独立：每个链起一个 prover 进程，各连各的 cdk-node aggregator
-- 多进程同机运行：常量文件通过 OS mmap 共享，每进程各自占用工作内存
+- 每个 prover 进程需 512-700GB+ RAM，**每链需一台独立 prover 机器**
 
 ---
 
@@ -730,3 +730,131 @@ cast rpc --rpc-url $L2_RPC zkevm_verifiedBatchNumber
 | 8 | aggregator 端口 | `cdk-node-config.toml` | 55 |
 | 8 | aggregator DB 配置 | `cdk-node-config.toml` | 60-67 |
 | 8 | WitnessURL 配置 | `cdk-node-config.toml` | 33 |
+
+---
+
+# 方案二：Prover 留在 Kurtosis 内，启用真实 ZK 证明
+
+方案一需要独立机器部署 prover，方案二则是 **不拆分 prover，让它继续在 Kurtosis enclave 内运行，但把证明从 mock 切换为真实**。
+
+## 与方案一的本质区别
+
+| | 方案一（独立部署） | 方案二（Kurtosis 内） |
+|---|---|---|
+| prover 位置 | 独立大内存机器 | Kurtosis 容器内（与 sequencer/node 同机） |
+| 主机要求 | prover 机器单独满足即可；Kurtosis 主机不变 | **整台 Kurtosis 主机必须满足**（Docker 容器共享宿主内核内存） |
+| 网络复杂度 | 需配置 cdk-node aggregator 端口对外暴露 | prover 用 Docker DNS 直连 `cdk-node-1:50081`，零配置 |
+| Kurtosis 修改 | 无需改模板（`zkevm_use_real_verifier: true` 跳过 prover 启动） | 需修改 prover 配置模板，因为默认只支持 mock |
+| 隔离性 | prover 资源独立，不影响其他服务 | prover 和其他服务争抢同一主机资源 |
+
+## 为什么需要 700GB —— 与方案无关，是真实 prover 自身的需求
+
+**无论方案一还是方案二，真实 prover 自身都需要 512-700GB+ RAM**。方案二不同的只是：prover 跑在 Kurtosis 主机上，因此这台主机必须满足这个内存要求。
+
+**事实依据**：
+
+| 来源 | 原文 | 文件:行号 |
+|------|------|-----------|
+| prover 配置文档 | `runAggregatorClient` 标注 "requires 512GB of RAM" | `zkevm-prover/src/config/README.md:19` |
+| kurtosis-cdk 模板注释 | "Running this service most likely requires 700GB+ of physical memory" | `kurtosis-cdk/templates/trusted-node/prover-config.json:69-70` |
+
+> 512GB 与 700GB 两个数字来自不同出处，512GB 是 prover 项目配置文档中 `runAggregatorClient` 的标注，700GB 是 kurtosis-cdk 模板的经验值注释。实际需求取决于批次大小和并发度，建议预留 700GB+。
+
+**内存消耗在哪里**：
+
+| 消耗来源 | 规模 | 能否 OS 级跨进程共享 |
+|---------|------|-------------------|
+| 常量多项式文件（证明密钥、验证密钥、STARK 参数） | 压缩包 75GB → 解压 115GB → mmap 后虚拟内存 ~200-300GB | ✅ 只读 mmap，OS 共享物理页 |
+| Merkle Tree 缓存 (`dbMTCacheSize`) | 默认 8GB | ❌ 每进程独立 |
+| 合约字节码缓存 (`dbProgramCacheSize`) | 默认 1GB | ❌ 每进程独立 |
+| Stark 证明工作区（多项式提交、FFT 中间结果） | 数百GB | ❌ 临时计算空间 |
+
+**关键**：尽管常量多项式文件可通过 OS mmap 跨进程共享物理页（这是技术事实），但每进程的工作内存仍需 300-400GB，因此实际部署中**一个 prover 进程 ≈ 一台 700GB 机器**。如需多链，每链一台 prover 机器。
+
+## 为什么 kurtosis-cdk 不直接支持
+
+`cdk_central_environment.star:30-37` 只有两个路径：
+
+```python
+if (not args["zkevm_use_real_verifier"] ...):
+    zkevm_prover_package.start_prover(...)   # prover 启动，但是 mock 模式
+# else: 根本不启动 prover（给方案一留空间）
+```
+
+模板 `prover-config.json` 里的模式是写死的（见第 72、84 行）：
+- `runAggregatorClient: false` — 不生成真实证明
+- `runAggregatorClientMock: true` — 生成假证明（当 `stateless_executor` 为 false 时）
+
+**没有模板变量控制"用真实证明还是 mock"**。要实现方案二，必须修改模板或部署后覆盖配置。
+
+## 实施步骤
+
+### 步骤 A：改 Kurtosis fork 的 prover 模板
+
+在你 fork 的 `Pana/kurtosis-cdk` 中，修改 `templates/trusted-node/prover-config.json`：
+
+将第 72 行和第 84 行的逻辑改为可配置：
+
+```
+# 原逻辑（写死 mock）：
+"runAggregatorClient": false,          # 第 72 行
+"runAggregatorClientMock": true,       # 第 84 行（非 stateless 时）
+
+# 改为模板变量控制：
+"runAggregatorClient": {{.zkevm_use_real_prover_client}},     # 由 args 控制
+"runAggregatorClientMock": {{.zkevm_use_mock_prover_client}},  # 与上面互斥
+```
+
+在 `input_parser.star` 中添加默认值：
+
+```python
+"zkevm_use_real_prover_client": False,   # 默认 mock
+"zkevm_use_mock_prover_client": True,
+```
+
+在你的 `params.template.yml` 中覆盖：
+
+```yaml
+args:
+  zkevm_use_real_prover_client: true
+  zkevm_use_mock_prover_client: false
+```
+
+### 步骤 B：部署在 700GB+ RAM 的主机上
+
+Kurtosis 主机需要满足 prover 的硬件要求（见 [硬件要求](#硬件要求)），其他服务如 cdk-erigon、cdk-node 等额外需要少量资源。
+
+### 步骤 C：部署并验证
+
+```bash
+# 用修改后的模板重新部署（prover 在 Kurtosis 内启动，使用真实证明）
+bash cdk_pipe.sh
+
+# 验证 prover 连上了 cdk-node aggregator
+kurtosis service logs cdk-gen cdk-node-1 | grep "connected prover"
+
+# 观察 verified batch 增长
+cast rpc --rpc-url $L2_RPC zkevm_verifiedBatchNumber
+```
+
+## 方案二的优势与局限
+
+**优势**：
+- 网络配置极简：prover 和 cdk-node 在同一 Docker 网络，直接用 `cdk-node-1:50081`
+- 不引入外部依赖，整体在一个主机上
+- Kurtosis 统一管理 prover 生命周期
+
+**局限**：
+- 主机必须同时满足 prover (700GB+) 和其他所有服务的内存需求
+- prover 资源消耗可能影响 sequencer 出块延迟
+- **必须 fork 并修改 kurtosis-cdk 模板**——官方模板不支持此模式
+- 扩容受限：多链场景下每链都需要一台 700GB+ 主机
+
+## 选择建议
+
+| 场景 | 推荐方案 |
+|------|---------|
+| 单链测试/验证真实性 | 方案二（Kurtosis 内，部署简单） |
+| 生产环境单链 | 方案一（独立部署，资源隔离） |
+| 多链生产 | 方案一（每链一台独立 prover 机器，每链一个独立 AggregatorClient 进程） |
+| 不想改 kurtosis-cdk 代码 | 方案一（不需要改模板，`zkevm_use_real_verifier: true` 直接跳过 prover 启动） |
