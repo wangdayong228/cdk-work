@@ -741,10 +741,11 @@ cast rpc --rpc-url $L2_RPC zkevm_verifiedBatchNumber
 
 | | 方案一（独立部署） | 方案二（Kurtosis 内） |
 |---|---|---|
-| prover 位置 | 独立大内存机器 | Kurtosis 容器内（与 sequencer/node 同机） |
+| prover 位置 | 独立大内存机器 | 与 sequencer/node 同机（Kurtosis 容器内或手动 docker run） |
 | 主机要求 | prover 机器单独满足即可；Kurtosis 主机不变 | **整台 Kurtosis 主机必须满足**（Docker 容器共享宿主内核内存） |
 | 网络复杂度 | 需配置 cdk-node aggregator 端口对外暴露 | prover 用 Docker DNS 直连 `cdk-node-1:50081`，零配置 |
-| Kurtosis 修改 | 无需改模板（`zkevm_use_real_verifier: true` 跳过 prover 启动） | 需修改 prover 配置模板，因为默认只支持 mock |
+| Kurtosis 修改 | 无需改模板 | 方式一（推荐）不需要；方式二/三需要修改模板 |
+| 多项式文件 | 手动下载后通过 `-v` 直接挂载 | 方式一（推荐）同样用 `-v` 挂载；方式二构建镜像；方式三 artifact（详见步骤 C-D） |
 | 隔离性 | prover 资源独立，不影响其他服务 | prover 和其他服务争抢同一主机资源 |
 
 ## 为什么需要 700GB —— 与方案无关，是真实 prover 自身的需求
@@ -787,6 +788,8 @@ if (not args["zkevm_use_real_verifier"] ...):
 
 **没有模板变量控制"用真实证明还是 mock"**。要实现方案二，必须修改模板或部署后覆盖配置。
 
+**模板未处理多项式文件注入**。即便开启了 `runAggregatorClient: true`，标准 prover 镜像不含多项式文件（115GB），真实证明无法运行。还需额外解决文件注入问题（详见下方步骤 C-D）。
+
 ## 实施步骤
 
 ### 步骤 A：改 Kurtosis fork 的 prover 模板
@@ -824,16 +827,339 @@ args:
 
 Kurtosis 主机需要满足 prover 的硬件要求（见 [硬件要求](#硬件要求)），其他服务如 cdk-erigon、cdk-node 等额外需要少量资源。
 
-### 步骤 C：部署并验证
+### 步骤 C：下载多项式常量文件
+
+**无论方案一还是方案二，真实证明都需要多项式常量文件。** 这是 Stark → Circom → Groth16 证明流水线的运行时输入，与 mock 模式无关。
+
+文件来源与规模：
+
+| 项目 | 数值 |
+|------|------|
+| 压缩包大小 | ~75 GB (`.tgz`) |
+| 解压后大小 | ~115 GB |
+| 下载地址 | `https://storage.googleapis.com/zkevm/zkproverc/v8.0.0-rc.9-fork.12.tgz` |
+
+解压后的目录结构（与 `configPath` = `"config"` 拼合后的默认路径）：
+
+```
+config/
+├── zkevm/
+│   ├── zkevm.const          # 常量多项式（mmap 后 ~200-300GB 虚拟内存）
+│   ├── zkevm.consttree       # 常量树（当前 LOAD_CONST_FILES=false，运行时计算）
+│   ├── zkevm.starkinfo.json  # STARK 结构描述
+│   ├── zkevm.verifier.dat    # 验证器参数
+│   ├── zkevm.verkey.json     # 验证密钥
+│   └── zkevm.chelpers.bin    # C 辅助函数
+├── c12a/                     # StarkC12a 阶段（同上结构）
+│   ├── c12a.const
+│   └── ...
+├── recursive1/               # Recursive1 阶段
+├── recursive2/               # Recursive2 阶段
+├── recursivef/               # RecursiveF 阶段
+├── final/                    # Groth16 最终证明
+│   ├── final.fflonk.verkey.json
+│   └── final.fflonk.zkey
+└── scripts/                  # ROM/脚本文件（镜像自带，会被覆盖）
+    ├── keccak_script.json
+    └── storage_sm_rom.json
+```
+
+**下载命令**（在 Kurtosis 主机上执行）：
 
 ```bash
-# 用修改后的模板重新部署（prover 在 Kurtosis 内启动，使用真实证明）
+# 参考 zkevm-prover/tools/download_archive.sh（config.cpp:225-266 定义默认路径）
+mkdir -p /data/prover-polynomials && cd /data/prover-polynomials
+wget -c https://storage.googleapis.com/zkevm/zkproverc/v8.0.0-rc.9-fork.12.tgz
+tar -xzvf v8.0.0-rc.9-fork.12.tgz
+# 解压后得到 v8.0.0-rc.9-fork.12/config/ 目录，含全部多项式文件
+
+# 验证关键文件存在
+ls v8.0.0-rc.9-fork.12/config/zkevm/zkevm.const
+ls v8.0.0-rc.9-fork.12/config/c12a/c12a.const
+ls v8.0.0-rc.9-fork.12/config/recursivef/recursivef.const
+ls v8.0.0-rc.9-fork.12/config/final/final.fflonk.zkey
+```
+
+> **版本对应关系**：`download_archive.sh:8` 中 `ARCHIVE_NAME="v8.0.0-rc.9-fork.12"`。当前使用的 prover 镜像是 `v8.0.0-RC16-fork.12`（`params.template.yml:22`），多项式存档与 prover 二进制的大版本（fork.12）匹配即可。如果未来升级 prover 镜像版本，需同步确认多项式存档版本。
+
+### 步骤 D：将多项式文件注入 Prover 容器（方案二核心难点）
+
+标准 prover Docker 镜像（`hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12`）**不包含**多项式文件。证据：
+
+- `Dockerfile:24` 确实 `COPY ./config ./config`，但 CI 构建时不会提前运行 `download_archive.sh`（115GB 产物无法推送到 Docker Hub）
+- kurtosis-cdk 的 prover 配置模板（`templates/trusted-node/prover-config.json`）中没有显式设置 `zkevmConstPols` 等路径字段，全部依赖 C++ 默认值 `configPath + "/zkevm/zkevm.const"`（`config.cpp:219,225`）
+- **Kurtosis `ServiceConfig` 不支持 Docker `-v`/`--volume` 绑定挂载**。官方 API 仅有 `files` 字段（artifact 打包上传），没有 `volumes`、`volume_mounts` 或 `bind_mounts` 字段
+
+以下是四种注入方式的分析。
+
+#### 方式一：跳过 Kurtosis Prover，手动 docker run -v 挂载（推荐）
+
+**原理**：不在 Kurtosis 内启动 prover，而是手动 `docker run`，通过 `-v` 绑定挂载宿主机多项式目录，并将容器接入 Kurtosis 的 Docker 网络，从而享受 Docker DNS 直连 `cdk-node-1:50081`。
+
+```
+                          Kurtosis Enclave (Docker Network: kt-xxx)
+  ┌──────────────────────────────────────────────────────────────┐
+  │  sequencer │ rpc │ cdk-node :50081 │ pool-mgr │ bridge       │
+  │                        ▲                                     │
+  │                        │ Docker DNS: cdk-node-1:50081        │
+  │                        │                                     │
+  │  ┌─────────────────────┼───────────────────────────────┐     │
+  │  │ zkevm-prover ───────┘                               │     │
+  │  │ (手动 docker run --network kt-xxx)                   │     │
+  │  │ -v /data/prover-polynomials/.../config:/usr/src/app/config │
+  │  └─────────────────────────────────────────────────────┘     │
+  └──────────────────────────────────────────────────────────────┘
+```
+
+**步骤**：
+
+**D1. 参数配置** — 在 `params.template.yml` 中设置，确保 Kurtosis 跳过 prover 启动：
+
+```yaml
+args:
+  # zkevm_use_real_verifier: true → L1 使用 Real Verifier
+  # zkevm_use_real_prover_client: false → 不在 Kurtosis 内启动 prover
+  zkevm_use_real_verifier: true
+  zkevm_use_real_prover_client: false
+  zkevm_use_mock_prover_client: false
+```
+
+条件逻辑（`cdk_central_environment.star:30-37`）：
+```
+(not true or false) → (false or false) → false → 跳过 start_prover()
+```
+
+prover 不在 Kurtosis 内启动，也就不需要修改 kurtosis-cdk 的 prover 配置模板 — **步骤 A 可跳过**。
+
+**D2. 部署 CDK（不含 prover）并获取 Docker 网络名**：
+
+```bash
+# 部署 CDK
 bash cdk_pipe.sh
 
-# 验证 prover 连上了 cdk-node aggregator
-kurtosis service logs cdk-gen cdk-node-1 | grep "connected prover"
+# 查找 Kurtosis 创建的 Docker 网络（格式 kt-<enclave-name>）
+docker network ls | grep kt-
+# 输出示例: 1a2b3c4d5e6f   kt-cdk-gen   bridge   local
+export KURTOSIS_NETWORK=$(docker network ls -q -f name=kt-)
+echo $KURTOSIS_NETWORK
+```
 
-# 观察 verified batch 增长
+**D3. 创建 Prover 配置文件**（参考方案一步骤 3 的模板）：
+
+```bash
+cat > /data/prover-polynomials/prover-config.json << 'PROVERCFG'
+{
+    "runExecutorServer": true,
+    "runHashDBServer": true,
+    "runAggregatorClient": true,
+    "runAggregatorClientMock": false,
+
+    "aggregatorClientHost": "cdk-node-1",
+    "aggregatorClientPort": 50081,
+
+    "configPath": "/usr/src/app/config",
+
+    "databaseURL": "local",
+    "dbMTCacheSize": 8192,
+    "dbProgramCacheSize": 1024,
+
+    "maxExecutorThreads": 20,
+    "maxHashDBThreads": 8,
+
+    "hashDBServerPort": 50061,
+    "executorServerPort": 50071,
+
+    "executeInParallel": true,
+    "useMainExecGenerated": true,
+    "stateManager": true,
+
+    "mapConstPolsFile": true
+}
+PROVERCFG
+```
+
+> **关键**：`aggregatorClientHost: "cdk-node-1"` 使用 Docker 内部 DNS（同一网络内自动解析）。`mapConstPolsFile: true` 启用 mmap 减少内存复制开销。
+
+**D4. 启动 Prover 容器**：
+
+```bash
+docker run -d \
+  --name zkevm-prover \
+  --network $KURTOSIS_NETWORK \
+  -v /data/prover-polynomials/v8.0.0-rc.9-fork.12/config:/usr/src/app/config \
+  -v /data/prover-polynomials/prover-config.json:/usr/src/app/config.json \
+  hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12 \
+  zkProver -c /usr/src/app/config.json
+```
+
+| 优点 | 缺点 |
+|------|------|
+| 宿主机文件直接挂载，零拷贝开销 | prover 不纳入 Kurtosis 生命周期管理 |
+| 不需要构建 115GB 镜像 | prover 启停需手动操作 |
+| 不需要修改 kurtosis-cdk 代码（步骤 A 可跳过） | 需要额外获取 Kurtosis Docker 网络名 |
+| 多项式文件更新只需替换宿主机目录 | — |
+| Docker DNS 直连 `cdk-node-1:50081`，零网络配置 | — |
+
+#### 方式二：构建包含多项式文件的自定义 Docker 镜像
+
+**原理**：基于标准 prover 镜像，将多项式文件 COPY 进去，构建一个"完整版"镜像。Kurtosis 仍管理 prover，但镜像含全部文件。
+
+```dockerfile
+# Dockerfile.prover-full
+FROM hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12
+
+# 将步骤 C 下载的多项式文件覆盖进镜像的 config/ 目录
+COPY ./v8.0.0-rc.9-fork.12/config /usr/src/app/config
+```
+
+```bash
+# 构建（在 /data/prover-polynomials 目录下）
+docker build -f Dockerfile.prover-full \
+  -t my-registry/zkevm-prover:v8.0.0-RC16-fork.12-full .
+
+# 推送到私有 registry（可选，单机部署可跳过）
+docker push my-registry/zkevm-prover:v8.0.0-RC16-fork.12-full
+```
+
+然后修改 `params.template.yml` 引用新镜像：
+
+```yaml
+args:
+  zkevm_prover_image: "my-registry/zkevm-prover:v8.0.0-RC16-fork.12-full"
+```
+
+**需要先完成步骤 A**（修改 prover 配置模板，开启 `runAggregatorClient: true`）。
+
+| 优点 | 缺点 |
+|------|------|
+| Kurtosis 统一管理 prover 生命周期 | 镜像 ~115GB，构建耗时（tar 解压 + COPY 约 10-20 分钟） |
+| 每次重建 enclave 无需重新上传文件 | `docker push/pull` 极其缓慢（仅单机部署可忽略） |
+| 与标准镜像使用方式完全一致 | 镜像版本升级需重新构建 |
+
+#### 方式三：通过 Kurtosis `plan.upload_files` 挂载
+
+**原理**：在 Kurtosis Starlark 中调用 `plan.upload_files()` 上传多项式目录作为 artifact，再通过 `ServiceConfig.files` 挂载到容器。
+
+需要修改两处 kurtosis-cdk 代码：
+
+**修改 1** — `lib/zkevm_prover.star`：`_start_service()` 增加 `polynomial_artifact` 参数：
+
+```python
+def _start_service(plan, type, args, config_artifact, polynomial_artifact, start_port_name):
+    # ... 省略 cpu_arch 检测等 ...
+    files = {
+        "/etc/zkevm": config_artifact,
+    }
+    if polynomial_artifact:
+        files["/usr/src/app/config"] = polynomial_artifact
+
+    return plan.add_service(
+        name="zkevm-" + type + args["deployment_suffix"],
+        config=ServiceConfig(
+            image=args["zkevm_prover_image"],
+            ports=ports,
+            public_ports=public_ports,
+            files=files,
+            # ... 省略 entrypoint/cmd ...
+        ),
+    )
+```
+
+同步修改 `start_prover()`、`start_executor()`、`start_stateless_executor()` 三个公开函数的签名。
+
+**修改 2** — `cdk_central_environment.star`：在调用 `start_prover()` 前上传多项式文件：
+
+```python
+polynomial_artifact = None
+if args["zkevm_use_real_prover_client"]:
+    polynomial_artifact = plan.upload_files(
+        src=args["zkevm_prover_polynomial_path"],
+        name="prover-polynomials",
+    )
+
+zkevm_prover_package.start_prover(
+    plan, args, prover_config_artifact, polynomial_artifact, "zkevm_prover_start_port"
+)
+```
+
+在 `input_parser.star` 中添加：
+
+```python
+"zkevm_prover_polynomial_path": "/data/prover-polynomials/v8.0.0-rc.9-fork.12/config",
+```
+
+**需要先完成步骤 A**。
+
+| 优点 | 缺点 |
+|------|------|
+| 镜像保持标准大小 | 每次重建 enclave 需重新打包/传输 115GB（同一主机约 10-30 分钟） |
+| 多项式文件可独立更新，无需重建镜像 | 需修改 3 个 Starlark 文件的函数签名 |
+| 不依赖 Docker registry | `plan.upload_files` 对超大目录的支持未充分验证 |
+
+#### 方式四：修改 entrypoint，容器启动时下载
+
+**原理**：在 `zkevm_prover.star` 的 `cmd` 中前置 wget 下载逻辑。
+
+```python
+cmd=[
+    'apt update && apt install -y wget && '
+    'wget -c https://storage.googleapis.com/zkevm/zkproverc/v8.0.0-rc.9-fork.12.tgz -P /tmp/ && '
+    'tar -xzf /tmp/v8.0.0-rc.9-fork.12.tgz -C /tmp/ && '
+    'rm -rf /usr/src/app/config && '
+    'mv /tmp/v8.0.0-rc.9-fork.12/config /usr/src/app/config && '
+    '/usr/local/bin/zkProver -c /etc/zkevm/{0}-config.json'.format(type),
+],
+```
+
+| 优点 | 缺点 |
+|------|------|
+| 零 kurtosis-cdk 结构改动 | 每次容器重启下载 75GB（约 10-60 分钟，取决于 GCS 带宽） |
+| 实现最简单 | 容器启动时间从秒级变为小时级 |
+| 不占额外磁盘空间（仅容器内） | 网络中断导致启动失败，无断点续传保障 |
+
+#### 推荐
+
+| 场景 | 推荐方式 |
+|------|---------|
+| 单机部署，想用 Docker -v 直接挂载 | **方式一**（零拷贝，不改 kurtosis-cdk，跳过步骤 A） |
+| 需要 Kurtosis 管理 prover 生命周期 | **方式二**（构建含多项式镜像） |
+| 频繁重建 enclave 的实验环境 | **方式三**（避免反复构建 115GB 镜像） |
+| 快速验证、网络条件好 | 方式四（改动最小，但启动极慢） |
+
+以下步骤 E 基于**方式一**编写（最简实施路径：不改 kurtosis-cdk，宿主机目录直接挂载）。
+
+### 步骤 E：部署并验证
+
+```bash
+# 1. 确认 params.template.yml 中的参数
+grep -E 'zkevm_use_real_verifier|zkevm_use_real_prover_client' cdk-work/scripts/params.template.yml
+
+# 2. 部署 CDK（Kurtosis 跳过 prover 启动）
+bash cdk_pipe.sh
+
+# 3. 确认 prover 不在 Kurtosis 服务列表中
+kurtosis enclave inspect cdk-gen | grep -c zkevm-prover
+# 预期输出: 0
+
+# 4. 启动外部 prover 容器（加入 Kurtosis Docker 网络）
+export KURTOSIS_NETWORK=$(docker network ls -q -f name=kt-)
+docker run -d \
+  --name zkevm-prover \
+  --network $KURTOSIS_NETWORK \
+  -v /data/prover-polynomials/v8.0.0-rc.9-fork.12/config:/usr/src/app/config \
+  -v /data/prover-polynomials/prover-config.json:/usr/src/app/config.json \
+  hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12 \
+  zkProver -c /usr/src/app/config.json
+
+# 5. 检查 prover 日志，确认连接 aggregator 成功
+docker logs -f zkevm-prover
+# 预期日志含: "Vectorization based on AVX2" 或 "AVX512"
+# 不应出现: "zkevm.const file not found" 之类错误
+
+# 6. 检查 cdk-node 日志，确认收到 prover 连接
+kurtosis service logs cdk-gen cdk-node-1 | grep -i "prover"
+
+# 7. 观察 verified batch 增长（真实证明需要数分钟，非瞬时）
 cast rpc --rpc-url $L2_RPC zkevm_verifiedBatchNumber
 ```
 
@@ -842,19 +1168,23 @@ cast rpc --rpc-url $L2_RPC zkevm_verifiedBatchNumber
 **优势**：
 - 网络配置极简：prover 和 cdk-node 在同一 Docker 网络，直接用 `cdk-node-1:50081`
 - 不引入外部依赖，整体在一个主机上
-- Kurtosis 统一管理 prover 生命周期
+- 方式一（推荐）**不需要修改 kurtosis-cdk 代码**，直接用 `docker run -v` + Kurtosis Docker 网络
+- 方式二保留 Kurtosis 统一管理 prover 生命周期
 
 **局限**：
 - 主机必须同时满足 prover (700GB+) 和其他所有服务的内存需求
 - prover 资源消耗可能影响 sequencer 出块延迟
-- **必须 fork 并修改 kurtosis-cdk 模板**——官方模板不支持此模式
+- 方式二/三**必须 fork 并修改 kurtosis-cdk 模板**（方式一可跳过步骤 A）
+- **必须额外处理多项式文件注入**（115GB）——标准镜像不含此文件（方式一用 `-v` 挂载最简）
 - 扩容受限：多链场景下每链都需要一台 700GB+ 主机
 
 ## 选择建议
 
 | 场景 | 推荐方案 |
 |------|---------|
-| 单链测试/验证真实性 | 方案二（Kurtosis 内，部署简单） |
-| 生产环境单链 | 方案一（独立部署，资源隔离） |
+| 单链测试/验证真实性 | 方案二方式一（最简：不改 kurtosis-cdk，docker run -v 挂载） |
+| 单链长期运行 | 方案二方式一（Docker DNS 直连，宿主机文件挂载，零拷贝） |
+| 生产环境单链 | 方案一（独立部署，资源隔离最彻底） |
 | 多链生产 | 方案一（每链一台独立 prover 机器，每链一个独立 AggregatorClient 进程） |
-| 不想改 kurtosis-cdk 代码 | 方案一（不需要改模板，`zkevm_use_real_verifier: true` 直接跳过 prover 启动） |
+| 需要 Kurtosis 管理 prover | 方案二方式二（构建含多项式镜像） |
+| 不想改 kurtosis-cdk 代码 | 方案二方式一 或 方案一（两者均不需要改模板） |
