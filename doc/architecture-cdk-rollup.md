@@ -582,12 +582,21 @@ args:
 
 ### 步骤 4：准备 Prover 数据库
 
-**文件**: `kurtosis-cdk/templates/databases/prover-db-init.sql`
+两种方式任选其一：
 
-在独立机器上创建 PostgreSQL 数据库并执行初始化脚本。该脚本创建：
+**方式 A — 复用 Kurtosis 的 prover_db（推荐）**
 
-- `state.nodes` 表 — 存储 Sparse Merkle Tree 节点
-- `state.program` 表 — 存储智能合约字节码
+Kurtosis 部署时 postgres 容器内已自动创建 `prover_db`（含 `state.nodes`、`state.program` 表），外部 prover 直接连该实例即可。通过 `kurtosis port print cdk-gen postgres-1 postgres` 获取映射端口，数据库连接串格式：
+
+```
+postgresql://prover_user:<password>@<kurtosis-host>:<mapped-port>/prover_db
+```
+
+> 密码为 `databases.star` 中 `PROVER_DB` 定义的 `password` 字段值。
+
+**方式 B — 自建 PostgreSQL**
+
+在 prover 机器上自建数据库，执行初始化脚本 `kurtosis-cdk/templates/databases/prover-db-init.sql`：
 
 ```bash
 createdb prover_db
@@ -720,7 +729,7 @@ cast rpc --rpc-url $L2_RPC zkevm_verifiedBatchNumber
 | 3 | `runAggregatorClient` | `config.cpp:124` | → `true` |
 | 3 | `runAggregatorClientMock` | `config.cpp:125` | → `false` |
 | 3 | `databaseURL` | `config.cpp:278` | 先用 `"local"`，生产改 PostgreSQL |
-| 4 | prover DB 初始化 SQL | `templates/databases/prover-db-init.sql` | 全文 |
+| 4 | prover DB：推荐复用 Kurtosis 的 prover_db，备选自建 | `templates/databases/prover-db-init.sql` | 全文 |
 | 5 | Docker 启动命令参考 | `test/docker-compose.yml` | 20-28 |
 | 5 | prover 镜像版本 | `params.template.yml` / `input_parser.star` | 22 / 72 |
 | 5 | Kurtosis 启动逻辑 | `lib/zkevm_prover.star` | 38-52 |
