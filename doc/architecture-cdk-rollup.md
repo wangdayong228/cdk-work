@@ -592,7 +592,7 @@ Kurtosis 部署时 postgres 容器内已自动创建 `prover_db`（含 `state.no
 postgresql://prover_user:<password>@<kurtosis-host>:<mapped-port>/prover_db
 ```
 
-> 密码为 `databases.star` 中 `PROVER_DB` 定义的 `password` 字段值。
+> 密码为 `databases.star` 中 `PROVER_DB` 定义的 `password` 字段值。 当前值为 “redacted”
 
 **方式 B — 自建 PostgreSQL**
 
@@ -1197,3 +1197,142 @@ cast rpc --rpc-url $L2_RPC zkevm_verifiedBatchNumber
 | 多链生产 | 方案一（每链一台独立 prover 机器，每链一个独立 AggregatorClient 进程） |
 | 需要 Kurtosis 管理 prover | 方案二方式二（构建含多项式镜像） |
 | 不想改 kurtosis-cdk 代码 | 方案二方式一 或 方案一（两者均不需要改模板） |
+
+
+# 简要综合实施步骤
+  1. zkevm_use_real_verifier: false 部署 → Kurtosis 启动 mock prover + L1 Mock Verifier
+  2. docker stop zkevm-prover-1（Kurtosis 内的 prover 容器）
+  3. 独立启动你的 prover，接同一个 cdk-node
+  4. 验证成功后，docker stop 换真实 prover 配置再启
+
+## mock zkevm-prover 配置
+
+```json
+{
+     "runExecutorServer": true,
+     "runHashDBServer": true,
+     "runAggregatorClient": false,
+     "runAggregatorClientMock": true,
+     "aggregatorClientMockTimeout": 1,
+
+     "aggregatorClientHost": "cdk-node-1",
+     "aggregatorClientPort": 50081,
+
+     "proverName": "test-prover",
+
+     "executorServerPort": 50071,
+     "hashDBServerPort": 50061,
+     "hashDBURL": "local",
+     "databaseURL": "postgresql://prover_user:redacted@postgres-1:5432/prover_db",
+
+     "keccakScriptFile": "config/scripts/keccak_script.json",
+     "storageRomFile": "config/scripts/storage_sm_rom.json",
+
+     "dbMTCacheSize": 1024,
+     "dbProgramCacheSize": 1024,
+     "dbMultiWrite": true,
+     "dbNumberOfPoolConnections": 30,
+     "dbGetTree": true,
+
+     "maxExecutorThreads": 20,
+     "maxHashDBThreads": 8,
+
+     "executeInParallel": true,
+     "useMainExecGenerated": true,
+     "stateManager": true,
+     "cleanerPollingPeriod": 600,
+     "requestsPersistence": 3600,
+
+     "saveOutputToFile": true,
+     "saveProofToFile": true,
+     "outputPath": "output"
+}
+```
+
+### 各配置项说明
+
+**运行模式（核心）**
+
+| 字段 | 值 | 说明 |
+|------|---|------|
+| `runExecutorServer` | `true` | 启动 Executor gRPC 服务端（端口 50071），被 sequencer 调用执行交易 |
+| `runHashDBServer` | `true` | 启动 HashDB gRPC 服务端（端口 50061），提供 Sparse Merkle Tree 状态读写 |
+| `runAggregatorClient` | `false` | 不启动真实证明客户端。改为 `true` 后连接 cdk-node aggregator 生成真实 ZK 证明，需 512GB+ RAM |
+| `runAggregatorClientMock` | `true` | 启动 mock 证明客户端，生成假证明（瞬时返回），用于测试全链路连通性 |
+| `aggregatorClientMockTimeout` | `1` | mock 证明返回延迟（微秒），`1` = 几乎瞬时。模拟真实延迟可设为 `180000000`（3分钟） |
+
+**网络连接**
+
+| 字段 | 值 | 说明 |
+|------|---|------|
+| `aggregatorClientHost` | `"cdk-node-1"` | cdk-node aggregator 的主机名。同一 Docker 网络内用服务名；外部部署改为宿主机 IP |
+| `aggregatorClientPort` | `50081` | cdk-node aggregator 端口。同一 Docker 网络用容器内端口；外部部署改为映射端口（如 `32783`） |
+
+**数据库**
+
+| 字段 | 值 | 说明 |
+|------|---|------|
+| `databaseURL` | `"postgresql://...@postgres-1:5432/prover_db"` | SMT 状态持久化。`"local"` = 进程内 SQLite（不需外部 DB）；同一 Docker 网络用服务名；外部部署改为宿主机 IP:映射端口 |
+| `dbMTCacheSize` | `1024` | Merkle Tree 节点缓存（MB）。默认 8192（8GB），mock 模式可降至 1024 |
+| `dbProgramCacheSize` | `1024` | 合约字节码缓存（MB）。默认 1024（1GB） |
+| `dbMultiWrite` | `true` | 批量写入数据库，减少 DB 往返 |
+| `dbNumberOfPoolConnections` | `30` | 数据库连接池大小 |
+| `dbGetTree` | `true` | 使用 PostgreSQL PL-SQL `GetTree` 函数获取 SMT 路径 |
+
+**端口与服务**
+
+| 字段 | 值 | 说明 |
+|------|---|------|
+| `executorServerPort` | `50071` | Executor gRPC 服务监听端口 |
+| `hashDBServerPort` | `50061` | HashDB gRPC 服务监听端口 |
+| `hashDBURL` | `"local"` | Executor 访问 HashDB 的方式。`"local"` = 进程内直连（性能最优）；设为 `"host:port"` 则走 gRPC 远程访问 |
+
+**脚本文件（ROM）**
+
+| 字段 | 值 | 说明 |
+|------|---|------|
+| `keccakScriptFile` | `"config/scripts/keccak_script.json"` | Keccak-f 状态机 ROM 脚本 |
+| `storageRomFile` | `"config/scripts/storage_sm_rom.json"` | Storage 状态机 ROM 脚本 |
+
+> 镜像自带，路径由 `configPath`（默认 `"config"`）前缀拼合。
+
+**线程池**
+
+| 字段 | 值 | 说明 |
+|------|---|------|
+| `maxExecutorThreads` | `20` | Executor gRPC 服务最大线程数 |
+| `maxHashDBThreads` | `8` | HashDB gRPC 服务最大线程数 |
+
+**性能与状态管理**
+
+| 字段 | 值 | 说明 |
+|------|---|------|
+| `executeInParallel` | `true` | 并行执行辅助状态机（Keccak、SHA256 等），提升吞吐 |
+| `useMainExecGenerated` | `true` | 使用编译期生成的 Main SM 代码，比解释执行快 |
+| `stateManager` | `true` | 批次间状态合并，避免重复写 DB 导致膨胀 |
+
+**清理**
+
+| 字段 | 值 | 说明 |
+|------|---|------|
+| `cleanerPollingPeriod` | `600` | 已完成批次清理检查间隔（秒） |
+| `requestsPersistence` | `3600` | 已完成批次保留时间（秒），超时后清理 |
+
+**调试输出**
+
+| 字段 | 值 | 说明 |
+|------|---|------|
+| `saveOutputToFile` | `true` | 保存执行结果到文件 |
+| `saveProofToFile` | `true` | 保存生成的证明到文件 |
+| `outputPath` | `"output"` | 输出文件目录 |
+| `proverName` | `"test-prover"` | prover 标识名，出现在 cdk-node 日志和 metrics 中 |
+
+### mock → real 变动清单
+
+| 字段 | mock | real |
+|------|------|------|
+| `runAggregatorClient` | `false` | `true` |
+| `runAggregatorClientMock` | `true` | `false` |
+| `aggregatorClientMockTimeout` | `1` | 删除此行 |
+| `databaseURL` | 视部署方式 | 外部部署时改 IP:映射端口 |
+| `aggregatorClientHost` | `"cdk-node-1"` | 外部部署时改宿主机 IP |

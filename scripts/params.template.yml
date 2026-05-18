@@ -20,7 +20,7 @@ args:
   consensus_contract_type: rollup
   agglayer_contracts_image: europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/agglayer-contracts:v11.0.0-rc.2-fork.12
   zkevm_prover_image: hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12
-  zkevm_use_real_verifier: true # 使用真实验证器, 跳过部署 zkevm-prover 服务
+  zkevm_use_real_verifier: false # 使用 true 则使用真实验证器, 跳过部署 zkevm-prover 服务。 使用 false 会部署 mock zkevm-prover 服务
   zkevm_use_real_prover_client: false  # 改为 true 启用真实证明，需要 700GB+ RAM，与 zkevm_use_mock_prover_client 互斥
   zkevm_use_mock_prover_client: true   # 改为 false 关闭假证明
   use_dynamic_ports: true
