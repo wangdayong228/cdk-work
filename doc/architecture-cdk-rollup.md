@@ -603,26 +603,33 @@ createdb prover_db
 psql -d prover_db -f prover-db-init.sql
 ```
 
-### 步骤 5：启动外部 Prover
+### 步骤 5：下载多项式常量文件
+
+真实证明需要多项式常量文件（115GB），详见 [方案二 — 步骤 C](#步骤-c下载多项式常量文件)。
+
+
+### 步骤 6：启动外部 Prover
 
 **前置条件**：硬件要求见上方 [硬件要求](#硬件要求) 章节（AVX2 必须、AVX512 推荐、512-700GB RAM、不需 GPU）。
 
-**Docker 启动参考** — `cdk/test/docker-compose.yml:20-28`（唯一的手动启动示例）：
+**Docker 启动**：
 
 ```bash
 docker run -d \
   --name zkevm-prover \
   -v /path/to/real-prover-config.json:/usr/src/app/config.json \
-  -v /path/to/prover-data:/app/config \
+  -v /data/prover-polynomials/v8.0.0-rc.9-fork.12/config:/usr/src/app/config \
   hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12 \
   zkProver -c /usr/src/app/config.json
 ```
+
+> `-v` 第二个挂载的容器内路径 `/usr/src/app/config` 必须与配置中 `configPath` 一致（默认 `"config"`），zkProver 二进制的工作目录为 `/usr/src/app`。
 
 **镜像版本来源**：
 
 | 来源 | 镜像 | 文件:行号 |
 |------|------|-----------|
-| 你的当前部署 | `hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12` | `cdk-work/scripts/params.template.yml:22` |
+| 当前部署 | `hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12` | `cdk-work/scripts/params.template.yml:22` |
 | kurtosis-cdk 默认 | `hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12` | `kurtosis-cdk/input_parser.star:72` |
 | CDK versions.json | `hermeznetwork/zkevm-prover:v8.0.0-RC14-fork.12` | `cdk/crates/cdk/versions.json:13` |
 
@@ -634,7 +641,7 @@ image=args["zkevm_prover_image"],
 cmd=['/usr/local/bin/zkProver -c /etc/zkevm/{type}-config.json']
 ```
 
-### 步骤 6：配置网络连通性
+### 步骤 7：配置网络连通性
 
 这是方案一最关键的步骤。Prover 需要访问 cdk-node 的 aggregator 端口。
 
@@ -683,13 +690,13 @@ ssh -L 50081:localhost:32785 user@cdk-node-host -N
 
 然后 prover 配置中 `aggregatorClientHost: "127.0.0.1"`, `aggregatorClientPort: 50081`。
 
-### 步骤 7：处理 erigon_strict_mode（可选）
+### 步骤 8：处理 erigon_strict_mode（可选）
 
 如果同时开启了 `erigon_strict_mode: true`，sequencer 需要在出块前等待 executor 的外部验证。详解见上方 [Stateless Executor 部署条件](#stateless-executor-部署条件)。
 
 如果外部 prover 不在同一 Docker 网络（方案 A），需要修改 fork 的模板让 executor 地址可配置（模板写死了 `zkevm-stateless-executor-1:50071`），或者采用方案 A 让 Docker DNS 解析生效。
 
-### 步骤 8：部署并验证
+### 步骤 9：部署并验证
 
 ```bash
 # 1. 重新部署 CDK（prover 不再在 Kurtosis 内启动）
@@ -730,15 +737,16 @@ cast rpc --rpc-url $L2_RPC zkevm_verifiedBatchNumber
 | 3 | `runAggregatorClientMock` | `config.cpp:125` | → `false` |
 | 3 | `databaseURL` | `config.cpp:278` | 先用 `"local"`，生产改 PostgreSQL |
 | 4 | prover DB：推荐复用 Kurtosis 的 prover_db，备选自建 | `templates/databases/prover-db-init.sql` | 全文 |
-| 5 | Docker 启动命令参考 | `test/docker-compose.yml` | 20-28 |
-| 5 | prover 镜像版本 | `params.template.yml` / `input_parser.star` | 22 / 72 |
-| 5 | Kurtosis 启动逻辑 | `lib/zkevm_prover.star` | 38-52 |
-| 6 | 网络连通（当前映射示例） | 实际 enclave inspect 输出 | — |
-| 7 | strict_mode executor-urls 条件 | `templates/cdk-erigon/config.yml` | 360-367 |
-| 7 | strict_mode 默认值 | `input_parser.star` | 319-321 |
-| 8 | aggregator 端口 | `cdk-node-config.toml` | 55 |
-| 8 | aggregator DB 配置 | `cdk-node-config.toml` | 60-67 |
-| 8 | WitnessURL 配置 | `cdk-node-config.toml` | 33 |
+| 5 | 下载多项式常量文件（115GB） | GCS `zkevm/zkproverc/` | `download_archive.sh:8` |
+| 6 | Docker 启动命令参考 | `test/docker-compose.yml` | 20-28 |
+| 6 | prover 镜像版本 | `params.template.yml` / `input_parser.star` | 22 / 72 |
+| 6 | Kurtosis 启动逻辑 | `lib/zkevm_prover.star` | 38-52 |
+| 7 | 网络连通（当前映射示例） | 实际 enclave inspect 输出 | — |
+| 8 | strict_mode executor-urls 条件 | `templates/cdk-erigon/config.yml` | 360-367 |
+| 8 | strict_mode 默认值 | `input_parser.star` | 319-321 |
+| 9 | aggregator 端口 | `cdk-node-config.toml` | 55 |
+| 9 | aggregator DB 配置 | `cdk-node-config.toml` | 60-67 |
+| 9 | WitnessURL 配置 | `cdk-node-config.toml` | 33 |
 
 ---
 
