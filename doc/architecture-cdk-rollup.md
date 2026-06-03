@@ -1607,7 +1607,6 @@ docker run -d \
      "runHashDBServer": true,
      "runAggregatorClient": true,
      "runAggregatorClientMock": false,
-     "saveRequestToFile":true,
 
      "aggregatorClientHost": "172.31.28.198",
      "aggregatorClientPort": 32784,
@@ -1634,6 +1633,8 @@ docker run -d \
      "cleanerPollingPeriod": 600,
      "requestsPersistence": 3600,
 
+     "saveRequestToFile": true,
+     "saveResponseToFile": true,
      "saveOutputToFile": true,
      "saveProofToFile": true,
      "outputPath": "output",
@@ -1645,6 +1646,8 @@ docker run -d \
      "maxProverThreads": 1
 }
 ```
+
+`saveRequestToFile` 会保存请求数据到 → *.aggregator_request.txt 里 gen_stateless_batch_proof_request
 
 ### 各配置项说明
 
