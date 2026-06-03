@@ -1528,12 +1528,20 @@ cast rpc --rpc-url $L2_RPC zkevm_verifiedBatchNumber
 
 
 # 简要综合实施步骤
-  1. zkevm_use_real_verifier: false 部署 → Kurtosis 启动 mock prover + L1 Mock Verifier
-  2. docker stop zkevm-prover-1（Kurtosis 内的 prover 容器）
-  3. 独立启动你的 prover，接同一个 cdk-node
-  4. 验证成功后，docker stop 换真实 prover 配置再启
+
+  1. 同一台机器运行 cdk+prover： 配置 `zkevm_use_real_verifier: false` 后部署， 即完成 Kurtosis 启动 mock prover + L1 Mock Verifier
+  2. 将 mock prover 拆到独立机器： `docker stop zkevm-prover-1`（Kurtosis 内的 prover 容器），独立启动 mock prover，接上面的 cdk-node, 至此 “独立 mock prover + kurtosis cdk” 完成
+  3. 开始验证 “独立 real prover + kurtosis cdk”，修改 cdk 配置 `zkevm_use_real_verifier: false` 后部署 kurtosis-cdk
+  4. 独立启动 real prover，接上面 cdk-node，验证通过则完成
 
 ## mock zkevm-prover 配置
+```sh
+docker run -d \
+  --name mock-prover-config-for-real-cdk.json \
+  -v ~/tmp/mock-prover-config.json:/usr/src/app/config.json \
+  hermeznetwork/zkevm-prover:v8.0.0-RC9-fork.12 \
+  zkProver -c /usr/src/app/config.json
+```
 
 ```json
 {
@@ -1574,6 +1582,61 @@ cast rpc --rpc-url $L2_RPC zkevm_verifiedBatchNumber
      "saveOutputToFile": true,
      "saveProofToFile": true,
      "outputPath": "output"
+}
+```
+
+## real prover 配置
+
+```sh
+docker run -d \
+  --name real-prover \
+  -v /home/ubuntu/tmp/real-prover-config.json:/usr/src/app/config.json \
+  -v /home/ubuntu/workspace/v8.0.0-rc.9-fork.12/config:/usr/src/app/config \
+  hermeznetwork/zkevm-prover:v8.0.0-RC9-fork.12 \
+  zkProver -c /usr/src/app/config.json
+```
+
+```json
+{
+     "runExecutorServer": true,
+     "runHashDBServer": true,
+     "runAggregatorClient": true,
+     "runAggregatorClientMock": false,
+
+     "aggregatorClientHost": "172.31.28.198",
+     "aggregatorClientPort": 32784,
+
+     "proverName": "real-prover-rc9-fork12",
+
+     "executorServerPort": 50071,
+     "hashDBServerPort": 50061,
+     "hashDBURL": "local",
+     "databaseURL": "postgresql://prover_user:redacted@172.31.28.198:32771/prover_db",
+
+     "keccakScriptFile": "config/scripts/keccak_script.json",
+     "storageRomFile": "config/scripts/storage_sm_rom.json",
+
+     "dbMTCacheSize": 1024,
+     "dbProgramCacheSize": 1024,
+     "dbMultiWrite": true,
+     "dbNumberOfPoolConnections": 30,
+     "dbGetTree": true,
+
+     "executeInParallel": true,
+     "useMainExecGenerated": true,
+     "stateManager": true,
+     "cleanerPollingPeriod": 600,
+     "requestsPersistence": 3600,
+
+     "saveOutputToFile": true,
+     "saveProofToFile": true,
+     "outputPath": "output",
+     "configPath": "/usr/src/app/config",
+
+     "mapConstPolsFile": true,
+     "mapConstantsTreeFile": true,
+     "maxExecutorThreads": 4,    
+     "maxProverThreads": 1
 }
 ```
 
