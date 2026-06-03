@@ -1554,6 +1554,7 @@ docker run -d \
      "runAggregatorClient": false,
      "runAggregatorClientMock": true,
      "aggregatorClientMockTimeout": 1,
+     "saveRequestToFile":true,
 
      "aggregatorClientHost": "cdk-node-1",
      "aggregatorClientPort": 50081,
@@ -1606,6 +1607,7 @@ docker run -d \
      "runHashDBServer": true,
      "runAggregatorClient": true,
      "runAggregatorClientMock": false,
+     "saveRequestToFile":true,
 
      "aggregatorClientHost": "172.31.28.198",
      "aggregatorClientPort": 32784,
