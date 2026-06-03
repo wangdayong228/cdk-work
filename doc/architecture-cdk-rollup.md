@@ -725,6 +725,10 @@ zkevm.executor-urls: zkevm-stateless-executor{{.deployment_suffix}}:{{.zkevm_exe
 
 无硬性最低要求。证明计算通过 OpenMP（`-fopenmp`）并行化，默认使用所有可用核心（`omp_get_num_procs()`）。实际瓶颈是内存，32-64 核服务器足够。
 
+### 可用机型
+
+- aws r7i.48xlarge 已测试可用，内存使用量 900G
+
 ## 多链共享分析
 
 | 组件 | 端口 | 能否跨链共享 | 原因 |
