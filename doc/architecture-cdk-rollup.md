@@ -1,5 +1,20 @@
 # 当前 CDK-Work 部署 CDK Rollup 架构图（Erigon Sequencer + Mock Prover + L1 直连）
 
+## 相关 repo 版本对齐
+
+以 `deploy-cfx-dev.sh` + [`params.template.yml`](../scripts/params.template.yml) 为准；合约镜像 tag 含 **`-fork.12`**，kurtosis 解析为 `fork_id=12`。
+
+| 组件 | 本仓库 submodule / 源码 | 运行时实际使用 | 对齐说明 |
+|------|-------------------------|----------------|----------|
+| kurtosis-cdk | `e4ce695` | `deploy.sh` 同 SHA | 一致 |
+| cdk-node | Pana `cdk` `v0.5.4`（`conflux0.5.4`） | `cdk_node_image: davidyoung2025/cdk:local` | 改 aggregator 等须 `make build-docker` 后重部署 |
+| agglayer-contracts | `v11.0.0-rc.2` | 镜像 `v11.0.0-rc.2-fork.12` | 与部署一致（`-fork.12` 用于 fork 解析） |
+| cdk-erigon | `v2.61.24` | Kurtosis 默认 `cdk-erigon:v2.61.24` | params 未覆盖；RPC/witness 来源 |
+| zkevm-prover | submodule `v8.0.0-RC16` | 外置部署；GCS **`v8.0.0-rc.9-fork.12`** | 二进制 RC16；setup 包名仍为 rc.9-fork.12 |
+| bridge / pool 等 | — | `input_parser.star` 默认镜像 | 与 enclave 服务名一致 |
+
+params 仍设 `zkevm_use_mock_prover_client: true`，仅影响 Kurtosis **内** prover；`real_verifier=true` 且 `real_prover_client=false` 时 enclave **无** prover，外置 prover 用自有 `config.json`（`runAggregatorClient=true`）。
+
 ## 架构总览
 
 ```mermaid
@@ -487,26 +502,33 @@ sendFinalProof() ── 后台 goroutine [aggregator.go:481]                    
   ├─ <- finalProof channel [go:486]              收到 ②/④ 发来的 msg       │    │
   ├─ startProofVerification() [go:495]             上锁                      │    │
   ├─ rpcClient.GetBatch() [go:498]                 拿 final batch 的实际值   │    │
+  ├─ compareFinalProofRootsWithRPC() [go:505]      打双边 SR/LER 日志；不一致则中止 │
   │                                                                        │    │
-  ├─ switch SettlementBackend [go:511]:                                     │    │
+  ├─ switch SettlementBackend [go:524]:                                     │    │
   │    │                                                                   │    │
   │    ├─ L1 (默认):                                                        │    │
-  │    │    └─ settleDirect() [go:517→580]                                 │    │
-  │    │         ├─ BuildTrustedVerifyBatchesTxData() [go:586]             │    │
-  │    │         ├─ ethTxManager.Add() [go:596]                            │    │
-  │    │         └─ handleMonitoredTxResult() [go:607→1630]                │    │
+  │    │    └─ settleDirect() [go:530→612]                                 │    │
+  │    │         ├─ BuildTrustedVerifyBatchesTxData() [go:599]             │    │
+  │    │         ├─ ethTxManager.Add() [go:609]                            │    │
+  │    │         └─ handleMonitoredTxResult() [go:620→1630]                │    │
   │    │              ├─ success → DeleteGeneratedProofs() [go:1656]       │    │
   │    │              └─ failed  → FATAL (os.Exit) [go:1633]              │    │
   │    │                                                                   │    │
   │    └─ AggLayer:                                                        │    │
-  │         └─ settleWithAggLayer() [go:513→528]                           │    │
+  │         └─ settleWithAggLayer() [go:526→577]                           │    │
   │              ├─ sign tx [go:544]                                       │    │
   │              ├─ aggLayerClient.SendTx() [go:554]                       │    │
   │              └─ aggLayerClient.WaitTxToBeMined() [go:569]              │    │
   │                                                                        │    │
-  ├─ resetVerifyProofTime() [go:522→1447]                                    │    │
-  └─ endProofVerification() [go:523→1440]          → 解锁 → 等下一个 msg    │    │
+  ├─ resetVerifyProofTime() [go:535→1447]                                    │    │
+  └─ endProofVerification() [go:536→1440]          → 解锁 → 等下一个 msg    │    │
 ```
+
+### 最终证明用的状态根与退出根
+
+prover 跑完一批交易会算出 **SR/LER**，写入证明公开输入。上链 calldata 的 `newStateRoot` / `newLocalExitRoot` 取自 **cdk-erigon RPC**（`zkevm_getBatchByNumber`），不是直接抄 prover 返回值；须与证明内一致，否则 L1 `InvalidProof`。`sendFinalProof` 会**始终打 prover 与 RPC 双边 SR/LER 日志**（`compareFinalProofRootsWithRPC`），不一致则**中止上链**。
+
+`zkevm_getBatchByNumber`：**无桥提现时 `localExitRoot=0` 正常**；`mainnetExitRoot`/`rollupExitRoot` 常为 0（该批 GER 在本地无 L1 info-tree 条目），**不影响** batch 证明；`globalExitRoot` 仍可非零（批次 GER）。排查 `InvalidProof` 先看日志双边 SR/LER，再查 `accInputHash` 与 SR。
 
 **主循环调用优先级**：FinalProof（已有 proof 直接提交）> AggregatedProof（合并两个 proof）> BatchProof（对新 batch 发起证明）。每轮只执行一项，成功后立即进入下一轮不 sleep。
 
@@ -527,6 +549,7 @@ sendFinalProof() ── 后台 goroutine [aggregator.go:481]                    
 | sequence 未同步 | `"Sequencing event for batch %d has not been synced yet..."` |
 | virtual 未同步 | `"Virtual batch %d has not been synced yet..."` |
 | 提交 L1 | `"Verifying final proof with ethereum smart contract"` |
+| 上链前根校验 | `"final proof roots: batch=..."` / `"prover/RPC roots mismatch"` |
 | HALT | `"HALTING: State root from the proof does not match..."` |
 | HALT | `"HALTING: Acc input hash from the proof does not match..."` |
 
@@ -1221,7 +1244,7 @@ ls v8.0.0-rc.9-fork.12/config/recursivef/recursivef.const
 ls v8.0.0-rc.9-fork.12/config/final/final.fflonk.zkey
 ```
 
-> **版本对应关系**：`download_archive.sh:8` 中 `ARCHIVE_NAME="v8.0.0-rc.9-fork.12"`。当前使用的 prover 镜像是 `v8.0.0-RC16-fork.12`（`params.template.yml:22`），多项式存档与 prover 二进制的大版本（fork.12）匹配即可。如果未来升级 prover 镜像版本，需同步确认多项式存档版本。
+> **版本对应关系**：`download_archive.sh:8` 中 `ARCHIVE_NAME="v8.0.0-rc.9-fork.12"`。prover 二进制可为 `v8.0.0-RC16-fork.12`（`params.template.yml:22`），RC16 代码库仍拉同一 setup 包；升级 prover 时以 `download_archive.sh` 的 `ARCHIVE_NAME` 为准，勿仅看镜像 tag。
 
 ### 步骤 D：将多项式文件注入 Prover 容器（方案二核心难点）
 
