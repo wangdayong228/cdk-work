@@ -1620,7 +1620,7 @@ docker run -d \
   --name real-prover \
   -v /home/ubuntu/tmp/real-prover-config.json:/usr/src/app/config.json \
   -v /home/ubuntu/workspace/v8.0.0-rc.9-fork.12/config:/usr/src/app/config \
-  hermeznetwork/zkevm-prover:v8.0.0-RC9-fork.12 \
+  hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12 \
   zkProver -c /usr/src/app/config.json
 ```
 
@@ -1631,15 +1631,15 @@ docker run -d \
      "runAggregatorClient": true,
      "runAggregatorClientMock": false,
 
-     "aggregatorClientHost": "172.31.28.198",
-     "aggregatorClientPort": 32784,
+     "aggregatorClientHost": "172.31.16.218",
+     "aggregatorClientPort": 32808,
 
-     "proverName": "real-prover-rc9-fork12",
+     "proverName": "real-prover-rc16-fork12",
 
      "executorServerPort": 50071,
      "hashDBServerPort": 50061,
      "hashDBURL": "local",
-     "databaseURL": "postgresql://prover_user:redacted@172.31.28.198:32771/prover_db",
+     "databaseURL": "postgresql://prover_user:redacted@172.31.16.218:32795/prover_db",
 
      "keccakScriptFile": "config/scripts/keccak_script.json",
      "storageRomFile": "config/scripts/storage_sm_rom.json",
