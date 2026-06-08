@@ -10,7 +10,7 @@ ssh -o StrictHostKeyChecking=no -i /Users/dayong/.ssh/dayong-op-stack.pem ubuntu
 
 ```sh
 rm workspace/ydyl-deployment-suite/output/cdk_pipe.state
-cd workspace/ydyl-deployment-suite/ydyl-deploy-client
+cd workspace/ydyl-deployment-suite
 L2_CHAIN_ID=10000 L1_CHAIN_ID=7655 L1_RPC_URL=http://184.32.182.132/espace L1_VAULT_PRIVATE_KEY=0xde5a8e8b373a70b6b475cb441ba61d8626fd6d3db81726aadc610867503d5778 L1_BRIDGE_HUB_CONTRACT=0x7aC81f608D15819148317EeAD3169734664205Bb L1_REGISTER_BRIDGE_PRIVATE_KEY=0xa3d9e98f0ba98960bf3755b7519d18b2250b0b8be5e38d5483dcfa3875df2d6f DRYRUN=false FORCE_DEPLOY_CDK=false ENABLE_GEN_ACC=false ./cdk_pipe.sh
 ```
 
