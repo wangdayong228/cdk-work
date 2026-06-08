@@ -3,3 +3,4 @@ dist
 params_*.yml
 l1-preallocated-mnemonic.sh
 output/*
+zk-prover-issue-material

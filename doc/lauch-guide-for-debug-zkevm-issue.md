@@ -1,0 +1,152 @@
+# zkEVM 问题调试启动指南
+
+## 连服务器
+
+```sh
+ssh -o StrictHostKeyChecking=no -i /Users/dayong/.ssh/dayong-op-stack.pem ubuntu@44.247.2.2
+```
+
+## 部署 kurtosis-cdk enclave 及周边服务
+
+```sh
+rm workspace/ydyl-deployment-suite/output/cdk_pipe.state
+cd workspace/ydyl-deployment-suite/ydyl-deploy-client
+L2_CHAIN_ID=10000 L1_CHAIN_ID=7655 L1_RPC_URL=http://184.32.182.132/espace L1_VAULT_PRIVATE_KEY=0xde5a8e8b373a70b6b475cb441ba61d8626fd6d3db81726aadc610867503d5778 L1_BRIDGE_HUB_CONTRACT=0x7aC81f608D15819148317EeAD3169734664205Bb L1_REGISTER_BRIDGE_PRIVATE_KEY=0xa3d9e98f0ba98960bf3755b7519d18b2250b0b8be5e38d5483dcfa3875df2d6f DRYRUN=false FORCE_DEPLOY_CDK=false ENABLE_GEN_ACC=false ./cdk_pipe.sh
+```
+
+部署完后会有一套 kurtosis cdk enclave 和 jsonrpc-proxy；jsonrpc-proxy-cdk 是一个代理，用于 conflux rpc 适配，使用 pm2 管理；（pm2其它服务用不到)
+
+```
+➜  pm2 ls
+┌────┬────────────────────────────────────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name                                   │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+├────┼────────────────────────────────────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┼──────────┼──────────┤
+│ 0  │ jsonrpc-proxy-cdk                      │ default     │ N/A     │ fork    │ 3819     │ 51m    │ 0    │ online    │ 0%       │ 115.7mb  │ ubuntu   │ disabled │
+│ 5  │ l1-l2-eventListener                    │ default     │ 1.0.0   │ cluster │ 42429    │ 31m    │ 0    │ online    │ 0%       │ 70.1mb   │ ubuntu   │ disabled │
+│ 6  │ l1-l2-proofFetcher                     │ default     │ 1.0.0   │ cluster │ 42430    │ 31m    │ 0    │ online    │ 0%       │ 70.4mb   │ ubuntu   │ disabled │
+│ 7  │ l1-l2-transactionSender                │ default     │ 1.0.0   │ cluster │ 42443    │ 31m    │ 0    │ online    │ 0%       │ 71.4mb   │ ubuntu   │ disabled │
+│ 8  │ l1-l2-transactionSenderBalanceCheck    │ default     │ 1.0.0   │ cluster │ 42444    │ 31m    │ 0    │ online    │ 0%       │ 72.4mb   │ ubuntu   │ disabled │
+│ 1  │ l2-l1-eventListener                    │ default     │ 1.0.0   │ cluster │ 42401    │ 31m    │ 0    │ online    │ 0%       │ 71.6mb   │ ubuntu   │ disabled │
+│ 2  │ l2-l1-proofFetcher                     │ default     │ 1.0.0   │ cluster │ 42402    │ 31m    │ 0    │ online    │ 0%       │ 70.2mb   │ ubuntu   │ disabled │
+│ 3  │ l2-l1-transactionSender                │ default     │ 1.0.0   │ cluster │ 42415    │ 31m    │ 0    │ online    │ 0%       │ 71.3mb   │ ubuntu   │ disabled │
+│ 4  │ l2-l1-transactionSenderBalanceCheck    │ default     │ 1.0.0   │ cluster │ 42416    │ 31m    │ 0    │ online    │ 0%       │ 73.9mb   │ ubuntu   │ disabled │
+│ 9  │ ydyl-console-service                   │ default     │ N/A     │ fork    │ 50413    │ 30m    │ 0    │ online    │ 0%       │ 39.4mb   │ ubuntu   │ disabled │
+└────┴────────────────────────────────────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+```
+
+## 看 kurtosis enclave 各容器情况
+
+```sh
+kurtosis enclave inspect cdk-gen
+```
+
+```
+========================================== User Services ==========================================
+UUID           Name                     Ports                                                     Status
+db8dde8d44b5   cdk-erigon-rpc-1         pprof: 6060/tcp -> http://127.0.0.1:32777                 RUNNING
+                                        prometheus: 9091/tcp -> http://127.0.0.1:32780
+                                        rpc: 8123/tcp -> http://127.0.0.1:32778
+                                        ws-rpc: 8133/tcp -> ws://127.0.0.1:32779
+bbe0fd12ac25   cdk-erigon-sequencer-1   data-streamer: 6900/tcp -> datastream://127.0.0.1:32772   RUNNING
+                                        pprof: 6060/tcp -> http://127.0.0.1:32771
+                                        prometheus: 9091/tcp -> http://127.0.0.1:32775
+                                        rpc: 8123/tcp -> http://127.0.0.1:32773
+                                        ws-rpc: 8133/tcp -> ws://127.0.0.1:32774
+e7f1f4893f4a   cdk-node-1               aggregator: 50081/tcp -> grpc://127.0.0.1:32783           RUNNING
+                                        rest: 5577/tcp -> http://127.0.0.1:32782
+                                        rpc: 5576/tcp -> http://127.0.0.1:32781
+b01247b94c9f   contracts-1              http: 8080/tcp -> http://127.0.0.1:32769                  RUNNING
+881e97583ca2   grafana-1                dashboards: 3000/tcp -> http://127.0.0.1:32789            RUNNING
+51b50890726e   panoptichain-1           prometheus: 9090/tcp -> http://127.0.0.1:32787            RUNNING
+9a1f8780624d   postgres-1               postgres: 5432/tcp -> postgresql://127.0.0.1:32770        RUNNING
+c0cc30439eb0   prometheus-1             http: 9090/tcp -> http://127.0.0.1:32788                  RUNNING
+b47845a91589   status-checker-1         prometheus: 9090/tcp -> http://127.0.0.1:32790            RUNNING
+3f7cd17108d6   zkevm-bridge-service-1   grpc: 9090/tcp -> grpc://127.0.0.1:32786                  RUNNING
+                                        prometheus: 8090/tcp -> http://127.0.0.1:32785
+                                        rpc: 8080/tcp -> http://127.0.0.1:32784
+1491b0db4b8e   zkevm-pool-manager-1     http: 8545/tcp -> http://127.0.0.1:32776                  RUNNING
+```
+
+## 看某个服务的 docker 容器
+
+```sh
+docker ps | grep <Name>
+```
+
+```
+➜  ~ docker ps | grep cdk-node-1
+c7a9909cc831   davidyoung2025/cdk:local                                                                                  "sh -c 'sleep 20 && …"   18 minutes ago   Up 18 minutes   0.0.0.0:32781->5576/tcp, [::]:32781->5576/tcp, 0.0.0.0:32782->5577/tcp, [::]:32782->5577/tcp, 0.0.0.0:32783->50081/tcp, [::]:32783->50081/tcp                                                                                                                                                                                        cdk-node-1--e7f1f4893f4a40119e1f9323dcca1bb0
+```
+
+## 当修改某个 repo 后需要 build docker
+
+比如 cdk-node 在修改后需要 `make build-docker`；然后修改 tag 到当前容器使用的 tag；当前 cdk 是 `davidyoung2025/cdk:local`。cdk-erigon 是 `hermeznetwork/cdk-erigon:v2.61.24`。
+
+## 部署 zkevm-prover
+
+### 设置 config 文件
+
+其中：
+
+- `aggregatorClientHost` 改为上方 kurtosis cdk IP，也就是 `44.247.2.2`
+- `aggregatorClientPort` 改为上方 kurtosis enclave `cdk-node-1` aggregator 端口，也就是 `32783`
+- `databaseURL` 中的 IP 改为 kurtosis cdk IP，也就是 `44.247.2.2`；端口改为 `postgres-1` 的端口，也就是 `32770`
+
+```json
+{
+     "runExecutorServer": true,
+     "runHashDBServer": true,
+     "runAggregatorClient": true,
+     "runAggregatorClientMock": false,
+
+     "aggregatorClientHost": "172.31.16.218",
+     "aggregatorClientPort": 32808,
+
+     "proverName": "real-prover-rc16-fork12",
+
+     "executorServerPort": 50071,
+     "hashDBServerPort": 50061,
+     "hashDBURL": "local",
+     "databaseURL": "postgresql://prover_user:redacted@172.31.16.218:32795/prover_db",
+
+     "keccakScriptFile": "config/scripts/keccak_script.json",
+     "storageRomFile": "config/scripts/storage_sm_rom.json",
+
+     "dbMTCacheSize": 1024,
+     "dbProgramCacheSize": 1024,
+     "dbMultiWrite": true,
+     "dbNumberOfPoolConnections": 30,
+     "dbGetTree": true,
+
+     "executeInParallel": true,
+     "useMainExecGenerated": true,
+     "stateManager": true,
+     "cleanerPollingPeriod": 600,
+     "requestsPersistence": 3600,
+
+     "saveRequestToFile": true,
+     "saveResponseToFile": true,
+     "saveOutputToFile": true,
+     "saveProofToFile": true,
+     "outputPath": "output",
+     "configPath": "/usr/src/app/config",
+
+     "mapConstPolsFile": true,
+     "mapConstantsTreeFile": true,
+     "maxExecutorThreads": 4,
+     "maxProverThreads": 1
+}
+```
+
+### 启动容器
+
+```sh
+docker run -d \
+  --name real-prover \
+  -v /home/ubuntu/tmp/real-prover-config.json:/usr/src/app/config.json \
+  -v /home/ubuntu/workspace/v8.0.0-rc.9-fork.12/config:/usr/src/app/config \
+  hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12 \
+  zkProver -c /usr/src/app/config.json
+```
+
+启动到生成证明大约 1～3 小时，在 `outputPath` 下可以看到 grpc 的通信数据。
