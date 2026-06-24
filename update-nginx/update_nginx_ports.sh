@@ -33,6 +33,17 @@ if [ ! -f "$INGRESS_FILE" ]; then
   exit 1
 fi
 
+# 清理 sites-enabled 中其他 enclave 的旧配置，避免路由冲突
+for link in /etc/nginx/sites-enabled/cdk-*-ingress.conf /etc/nginx/sites-enabled/cdk-*-ports; do
+  if [ -L "$link" ]; then
+    target=$(readlink -f "$link" 2>/dev/null || echo "")
+    if [[ "$target" != *"${ENCLAVE_NAME}"* ]]; then
+      echo "清理旧 enclave 配置: $link"
+      sudo rm -f "$link"
+    fi
+  fi
+done
+
 # 复制时显式目标文件名，并使用 sudo；按需选择 -f(覆盖) 或 -n(不覆盖)
 sudo cp -f "$INGRESS_FILE" "/etc/nginx/sites-available/${ENCLAVE_NAME}-ingress.conf"
 # 创建/更新符号链接：-s(软链) -f(覆盖已存在) -n(不跟随目录) -v(可选：打印)
@@ -62,7 +73,7 @@ L2_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} cdk-erigon-rpc-1 rpc)
 BRIDGE_UI_PORT=http://127.0.0.1:9999 #$(kurtosis port print ${ENCLAVE_NAME} zkevm-bridge-ui-1 web-ui)
 BRIDGE_SERVICE_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} zkevm-bridge-service-1 rpc)
 PROMETHEUS_PORT=$(kurtosis port print ${ENCLAVE_NAME} prometheus-1 http)
-GRAFANA_PORT=$(kurtosis port print ${ENCLAVE_NAME} grafana-1 dashboards)
+GRAFANA_PORT=$(kurtosis port print ${ENCLAVE_NAME} grafana-1 http)
 
 
 # 替换模板中的变量
@@ -101,7 +112,14 @@ if [[ "$answer" == "y" || "$answer" == "yes" ]]; then
         fi
 
         echo "创建符号链接到 sites-enabled 目录..."
-        sudo ln -s "$CONFIG_FILE" "$LINK_FILE" || echo "创建符号链接失败，请手动执行: sudo ln -s $CONFIG_FILE $LINK_FILE"
+        sudo ln -sfn "$CONFIG_FILE" "$LINK_FILE" || echo "创建符号链接失败，请手动执行: sudo ln -sfn $CONFIG_FILE $LINK_FILE"
+        
+        # 添加 WebSocket 升级所需的 map 指令（仅添加一次）
+        WS_MAP_FILE="/etc/nginx/conf.d/websocket_upgrade.conf"
+        if [ ! -f "$WS_MAP_FILE" ]; then
+            printf 'map $http_upgrade $connection_upgrade {\n    default upgrade;\n    ""      close;\n}\n' | sudo tee "$WS_MAP_FILE" > /dev/null
+            echo "已添加 WebSocket map 指令到 $WS_MAP_FILE"
+        fi
         
         echo "提示：正在测试和重新加载Nginx配置..."
         sudo nginx -t  # 测试配置

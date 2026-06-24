@@ -62,7 +62,9 @@ run_deploy() {
   export DEPLOY_TEMPLATE_FILE="$TEMPLATE_FILE"
   export DEPLOY_RENDERED_ARGS_FILE="$TEMP_CONFIG"
   export DEPLOY_LOG_FILE="$LOG_FILE"
-  export DEPLOY_PACKAGE_LOCATOR="github.com/Pana/kurtosis-cdk@e4ce695b5fb27eba11cfe4dd3ae966d382c44a3b"
+#   export DEPLOY_PACKAGE_LOCATOR="github.com/Pana/kurtosis-cdk@e4ce695b5fb27eba11cfe4dd3ae966d382c44a3b"
+  # Use local patched kurtosis-cdk; change to remote git hash to revert to upstream
+  export DEPLOY_PACKAGE_LOCATOR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/kurtosis-cdk"
   export DEPLOY_UPDATE_NGINX_SCRIPT="$UPDATE_NGINX_SCRIPT"
   export DEPLOY_DRYRUN="$DRYRUN"
   export DEPLOY_FORCE="$FORCE_DEPLOY_CDK"
