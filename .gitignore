@@ -3,3 +3,6 @@ dist
 params_*.yml
 l1-preallocated-mnemonic.sh
 output/*
+params-gen.yml
+params-cfx-dev.yml
+cdk-work.patch
