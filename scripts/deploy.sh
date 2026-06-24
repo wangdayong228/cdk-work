@@ -8,6 +8,9 @@ DRYRUN=${DRYRUN:-false}
 FORCE_DEPLOY_CDK=${FORCE_DEPLOY_CDK:-false}
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+# shellcheck source=./prover_env.sh
+source "$SCRIPT_DIR/prover_env.sh"
+
 resolve_scripts_lib_dir() {
   YDYL_SCRIPTS_LIB_DIR="${YDYL_SCRIPTS_LIB_DIR:-$REPO_ROOT/ydyl-scripts-lib}"
   if [ ! -f "$YDYL_SCRIPTS_LIB_DIR/utils.sh" ] || [ ! -f "$YDYL_SCRIPTS_LIB_DIR/deploy_common.sh" ]; then
@@ -43,6 +46,8 @@ prepare_paths() {
 }
 
 prepare_cdk_env() {
+  resolve_cdk_prover_env
+
   L2_CONFIG=$(polycli wallet inspect --mnemonic "$KURTOSIS_L1_PREALLOCATED_MNEMONIC" --addresses 13 | jq -r '.Addresses[1:][] | [.ETHAddress, .HexPrivateKey] | @tsv' | awk 'BEGIN{split("sequencer,aggregator,claimtxmanager,timelock,admin,loadtest,agglayer,dac,proofsigner,l1testing,claimsponsor,l1_panoptichain",roles,",")} {print "  # " roles[NR] "\n  zkevm_l2_" roles[NR] "_address: \"" $1 "\""; print "  zkevm_l2_" roles[NR] "_private_key: \"0x" $2 "\"\n"}')
   export L2_CONFIG
 

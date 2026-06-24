@@ -154,9 +154,6 @@ docker rm real-prover 2>/dev/null; docker run -d \
 
 启动到生成证明大约 1～3 小时，在 `outputPath` 下可以看到 grpc 的通信数据。
 
-
-启动到生成证明大约 1～3 小时，在 `outputPath` 下可以看到 grpc 的通信数据。
-
 ---
 
 ## 自动对比 InvalidProof (0x09bde339) 两边数据
