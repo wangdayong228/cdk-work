@@ -26,7 +26,8 @@ args:
   zkevm_use_mock_prover_client: $USE_MOCK_PROVER   # USE_REAL_PROVER 取反：false 时关闭 mock 证明，true 时启用 mock 证明
   use_dynamic_ports: true
   zkevm_bridge_ui_image: zkevm-bridge-ui:0006445 # local build image, 编译方式参看 docker/README.md
-  cdk_node_image: davidyoung2025/cdk:local # local build image, 编译方式, 在 cdk 目录下执行 make build-docker
+  cdk_node_image: davidyoung2025/cdk:local # local build image with proverSR debug logging
+  cdk_erigon_node_image: hermeznetwork/cdk-erigon:local # 使用本机最新编译镜像
   # 区分每条链
   deployment_suffix: '-1'
   zkevm_rollup_chain_id: $L2_CHAIN_ID

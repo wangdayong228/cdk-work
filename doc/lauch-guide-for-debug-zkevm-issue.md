@@ -7,11 +7,14 @@ ssh -o StrictHostKeyChecking=no -i /Users/dayong/.ssh/dayong-op-stack.pem ubuntu
 ```
 
 ## 部署 kurtosis-cdk enclave 及周边服务
-
+```sh
+# rm -f /home/ubuntu/workspace/ydyl-deployment-suite/output/cdk_pipe.state; rm -f /home/ubuntu/workspace/ydyl-deployment-suite/cdk-work/output/*; rm -rf /home/ubuntu/workspace/ydyl-deployment-suite/zk-claim-service/.env;
+kurtosis enclave rm cdk-gen -f 2>&1 | tail -2 && rm -f /home/ubuntu/workspace/ydyl-deployment-suite/output/cdk_pipe.state && pm2 delete jsonrpc-proxy-cdk 2>/dev/null; echo "清理完成"
+```
 ```sh
 rm workspace/ydyl-deployment-suite/output/cdk_pipe.state
 cd workspace/ydyl-deployment-suite
-L2_CHAIN_ID=10000 L1_CHAIN_ID=7655 L1_RPC_URL=http://184.32.182.132/espace L1_VAULT_PRIVATE_KEY=0xde5a8e8b373a70b6b475cb441ba61d8626fd6d3db81726aadc610867503d5778 L1_BRIDGE_HUB_CONTRACT=0x7aC81f608D15819148317EeAD3169734664205Bb L1_REGISTER_BRIDGE_PRIVATE_KEY=0xa3d9e98f0ba98960bf3755b7519d18b2250b0b8be5e38d5483dcfa3875df2d6f DRYRUN=false FORCE_DEPLOY_CDK=false ENABLE_GEN_ACC=false ./cdk_pipe.sh
+L2_CHAIN_ID=10000 L1_CHAIN_ID=7655 L1_RPC_URL=http://184.32.182.132/espace L1_VAULT_PRIVATE_KEY=0xde5a8e8b373a70b6b475cb441ba61d8626fd6d3db81726aadc610867503d5778 L1_BRIDGE_HUB_CONTRACT=0x7aC81f608D15819148317EeAD3169734664205Bb L1_REGISTER_BRIDGE_PRIVATE_KEY=0xa3d9e98f0ba98960bf3755b7519d18b2250b0b8be5e38d5483dcfa3875df2d6f DRYRUN=false FORCE_DEPLOY_CDK=true ENABLE_GEN_ACC=false ./cdk_pipe.sh
 ```
 
 部署完后会有一套 kurtosis cdk enclave 和 jsonrpc-proxy；jsonrpc-proxy-cdk 是一个代理，用于 conflux rpc 适配，使用 pm2 管理；（pm2其它服务用不到)
@@ -99,15 +102,15 @@ c7a9909cc831   davidyoung2025/cdk:local                                         
      "runAggregatorClient": true,
      "runAggregatorClientMock": false,
 
-     "aggregatorClientHost": "172.31.16.218",
-     "aggregatorClientPort": 32808,
+     "aggregatorClientHost": "44.247.2.2",
+     "aggregatorClientPort": 32783,
 
      "proverName": "real-prover-rc16-fork12",
 
      "executorServerPort": 50071,
      "hashDBServerPort": 50061,
      "hashDBURL": "local",
-     "databaseURL": "postgresql://prover_user:redacted@172.31.16.218:32795/prover_db",
+     "databaseURL": "postgresql://prover_user:redacted@44.247.2.2:32770/prover_db",
 
      "keccakScriptFile": "config/scripts/keccak_script.json",
      "storageRomFile": "config/scripts/storage_sm_rom.json",
@@ -141,12 +144,105 @@ c7a9909cc831   davidyoung2025/cdk:local                                         
 ### 启动容器
 
 ```sh
-docker run -d \
+docker rm real-prover 2>/dev/null; docker run -d \
   --name real-prover \
-  -v /home/ubuntu/tmp/real-prover-config.json:/usr/src/app/config.json \
-  -v /home/ubuntu/workspace/v8.0.0-rc.9-fork.12/config:/usr/src/app/config \
+  -v /root/polygon-suite/zkevm-prover/config.json:/usr/src/app/config.json \
+  -v /root/polygon-suite/zkevm-prover/v8.0.0-rc.9-fork.12/config:/usr/src/app/config \
   hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12 \
   zkProver -c /usr/src/app/config.json
 ```
 
 启动到生成证明大约 1～3 小时，在 `outputPath` 下可以看到 grpc 的通信数据。
+
+---
+
+## 自动对比 InvalidProof (0x09bde339) 两边数据
+
+当 aggregator 提交 batch proof 到 L1 失败并返回 `execution reverted: InvalidProof()` 时，需要对比 **prover 电路 public inputs** 与 **L1 合约期望的 inputSnark 字段**，定位具体哪个字段不匹配。
+
+### 工具位置
+
+`cdk-work/scripts/compare-invalidproof.py`
+
+### 依赖
+
+- Python 3
+- `cast` (foundry) — 用于查询 L1 链上数据
+- `docker` — 用于从 aggregator 容器提取 proof
+
+### 用法 1：自动从 aggregator 容器提取并对比（推荐）
+
+```sh
+cd /home/ubuntu/workspace/ydyl-deployment-suite/cdk-work/scripts
+python3 compare-invalidproof.py --batch 1
+```
+
+参数说明：
+- `--batch 1`：要对比的 batch 编号（默认 1）
+- `--aggregator-container cdk-node-1--...`：aggregator 容器名（默认当前 enclave 的 cdk-node-1）
+- `--l1-rpc http://184.32.182.132/espace`：L1 RPC URL
+- `--rollup-manager 0x9dfC9f5864F1d1a7dB83EC2e81F876BFD68dF1EE`：RollupManager 合约地址
+
+### 用法 2：离线模式（手动提供 publics）
+
+如果你已经从其他地方拿到了 prover 的 publics 数组（44 个 Goldilocks field elements），可以离线对比：
+
+```sh
+python3 compare-invalidproof.py --offline \
+  --publics '2420688097,2333259367,2981116379,1944022402,1542236844,4111906473,3224877213,4286371784,0,0,0,0,0,0,0,0,0,10000,12,2420688097,2333259367,2981116379,1944022402,1542236844,4111906473,3224877213,4286371784,878221566,4158253300,1449558182,1396388316,308403776,3351930181,2850044872,3172363002,0,0,0,0,0,0,0,0,1' \
+  --l1-rpc http://184.32.182.132/espace
+```
+
+### 输出示例
+
+```
+======================================================================
+Batch 1 InvalidProof 对比结果
+======================================================================
+
+Field                Prover (circuit)                                                     L1 (contract)                                                        Status
+-------------------- -------------------------------------------------------------------- -------------------------------------------------------------------- ----------
+oldStateRoot         0xff7cd7c8c037b89df516b6a95becaaac73df6d82b1b039db8b12b6679048c4e1   0xd96db188d8a5a3193c085e10488be6624182c23955a5927e0cf3ae941f10d1ea   MISMATCH
+oldAccInputHash      0x0000000000000000000000000000000000000000000000000000000000000000   0x0000000000000000000000000000000000000000000000000000000000000000   OK
+initNumBatch         0                                                                    0                                                                    OK
+chainID              10000                                                                10000                                                                OK
+forkID               12                                                                   12                                                                   OK
+newStateRoot         0xff7cd7c8c037b89df516b6a95becaaac73df6d82b1b039db8b12b6679048c4e1   0x0000000000000000000000000000000000000000000000000000000000000000   MISMATCH
+newAccInputHash      0xbd166afaa9e03bc8c7ca65451261de40533b31dc566680a6f7d9e8f4345898fe   0x3b488027196ccf45ee5a2897daf281536fd8aa37535b76c47de4b46125d88644   MISMATCH
+newLocalExitRoot     0x0000000000000000000000000000000000000000000000000000000000000000   0x0000000000000000000000000000000000000000000000000000000000000000   OK
+finalNewBatch        1                                                                    1                                                                    OK
+
+======================================================================
+发现 4 个不匹配字段: oldStateRoot, newStateRoot, newAccInputHash
+这些字段的差异会导致 inputSnark 的 sha256 结果不同，从而触发 InvalidProof (0x09bde339)。
+======================================================================
+```
+
+### 字段说明
+
+| 字段 | L1 来源 | Prover 来源 |
+|------|---------|-------------|
+| oldStateRoot | `batchNumToStateRoot[initNumBatch]` | witness2db 从 witness 重算的 OLD smt 根 |
+| oldAccInputHash | `sequencedBatches[initNumBatch].accInputHash` | publics[8..15] |
+| newStateRoot | aggregator 传入 (= proverSR) | publics[19..26] |
+| newAccInputHash | `sequencedBatches[finalNewBatch].accInputHash` | publics[27..34] |
+| newLocalExitRoot | aggregator 传入 (= proverLER) | publics[35..42] |
+
+### fea2scalar 解码算法
+
+prover 的 publics 是 Goldilocks field elements (uint64)。`compare-invalidproof.py` 使用与 zkevm-prover 相同的 `fea2scalar` 算法解码为 bytes32：
+
+- 每 2 个 publics 元素组成一个 64 位值：高 32 位来自奇数索引元素，低 32 位来自偶数索引元素
+- 4 对元素组成 256 位 = 32 字节
+- 整体大端排列（第 7/6 对在最前面）
+
+例如 publics[19..26] 解码为 newStateRoot：
+```python
+pairs = [
+    (publics[26] << 32) + publics[25],  # fe7 + fe6
+    (publics[24] << 32) + publics[23],  # fe5 + fe4
+    (publics[22] << 32) + publics[21],  # fe3 + fe2
+    (publics[20] << 32) + publics[19],  # fe1 + fe0
+]
+scalar = (pairs[0] << 192) | (pairs[1] << 128) | (pairs[2] << 64) | pairs[3]
+```
