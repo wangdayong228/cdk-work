@@ -125,6 +125,14 @@ if [[ "$answer" == "y" || "$answer" == "yes" ]]; then
         sudo nginx -t  # 测试配置
         sudo nginx -s reload  # 重新加载Nginx
         echo "Nginx配置重启完成！"
+
+        # 如果存在 cdk-node-1 容器，补充固定 aggregator 对外端口（60500 -> 50081）
+        AGGREGATOR_FIX_SCRIPT="${SCRIPT_DIR}/fix_aggregator_port.sh"
+        if [ -f "$AGGREGATOR_FIX_SCRIPT" ] && docker ps --format '{{.Names}}' | grep -qE '^cdk-node-1--'; then
+            ENCLAVE_NAME="$ENCLAVE_NAME" SERVICE_NAME="cdk-node-1" bash "$AGGREGATOR_FIX_SCRIPT"
+        else
+            echo "未检测到 cdk-node-1 容器或缺少 fix_aggregator_port.sh，跳过 aggregator 固定端口配置。"
+        fi
     else
         echo "写入配置文件失败，请检查权限"
         exit 1
