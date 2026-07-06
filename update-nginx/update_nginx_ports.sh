@@ -133,6 +133,14 @@ if [[ "$answer" == "y" || "$answer" == "yes" ]]; then
         else
             echo "未检测到 cdk-node-1 容器或缺少 fix_aggregator_port.sh，跳过 aggregator 固定端口配置。"
         fi
+
+        # 如果存在 postgres-1 容器，补充固定 postgres 对外端口（60600 -> 5432）
+        POSTGRES_FIX_SCRIPT="${SCRIPT_DIR}/fix_postgres_port.sh"
+        if [ -f "$POSTGRES_FIX_SCRIPT" ] && docker ps --format '{{.Names}}' | grep -qE '^postgres-1--'; then
+            ENCLAVE_NAME="$ENCLAVE_NAME" SERVICE_NAME="postgres-1" bash "$POSTGRES_FIX_SCRIPT"
+        else
+            echo "未检测到 postgres-1 容器或缺少 fix_postgres_port.sh，跳过 postgres 固定端口配置。"
+        fi
     else
         echo "写入配置文件失败，请检查权限"
         exit 1
