@@ -73,7 +73,7 @@ L2_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} cdk-erigon-rpc-1 rpc)
 BRIDGE_UI_PORT=http://127.0.0.1:9999 #$(kurtosis port print ${ENCLAVE_NAME} zkevm-bridge-ui-1 web-ui)
 BRIDGE_SERVICE_RPC_PORT=$(kurtosis port print ${ENCLAVE_NAME} zkevm-bridge-service-1 rpc)
 PROMETHEUS_PORT=$(kurtosis port print ${ENCLAVE_NAME} prometheus-1 http)
-GRAFANA_PORT=$(kurtosis port print ${ENCLAVE_NAME} grafana-1 http)
+GRAFANA_PORT=$(kurtosis port print ${ENCLAVE_NAME} grafana-1 dashboards)
 
 
 # 替换模板中的变量
