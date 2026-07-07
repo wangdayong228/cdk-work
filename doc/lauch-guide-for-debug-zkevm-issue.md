@@ -83,17 +83,37 @@ c7a9909cc831   davidyoung2025/cdk:local                                         
 
 ## 当修改某个 repo 后需要 build docker
 
-比如 cdk-node 在修改后需要 `make build-docker`；然后修改 tag 到当前容器使用的 tag；当前 cdk 是 `davidyoung2025/cdk:local`。cdk-erigon 是 `hermeznetwork/cdk-erigon:v2.61.24`。
+比如 cdk-node 在修改后需要 `make build-docker`；然后修改 tag 到当前容器使用的 tag；当前 cdk 是 `davidyoung2025/cdk:local`。cdk-erigon 是 `hermeznetwork/cdk-erigon:local`。
 
 ## 部署 zkevm-prover
 
-### 设置 config 文件
+### 机器配置
+推荐：阿里云 `ecs.hfr9i.36xlarge` + 500G 硬盘
+实际使用内存 800G，可以选择对应机型
+
+注意：aws 的机器初始化和生成证明都特别慢，具体原因未知，所以一定要用阿里云机器
+
+### docker build
+
+注意：docker build 时使用 repo 中的多项式即可；在 docker run 时需要挂载真实多项式（见[启动容器](#启动容器)）
+
+```sh
+git clone https://github.com/wangdayong228/zkevm-prover.git
+cd zkevm-prover
+
+git checkout v8.0.0-rc9-conflux
+git submodule update --init --recursive 
+
+sudo docker build -t zkprover .
+```
+
+### 创建 config 文件
 
 其中：
 
 - `aggregatorClientHost` 改为上方 kurtosis cdk IP，也就是 `44.247.2.2`
-- `aggregatorClientPort` 改为上方 kurtosis enclave `cdk-node-1` aggregator 端口，也就是 `32783`
-- `databaseURL` 中的 IP 改为 kurtosis cdk IP，也就是 `44.247.2.2`；端口改为 `postgres-1` 的端口，也就是 `32770`
+- `aggregatorClientPort` 改为上方 kurtosis enclave `cdk-node-1` aggregator 端口，也就是 `32783`，现已通过 `update-nginx` 固定为 60500
+- `databaseURL` 中的 IP 改为 kurtosis cdk IP，也就是 `44.247.2.2`；端口改为 `postgres-1` 的端口，也就是 `32770`，现已通过 `update-nginx` 固定为 60600
 
 ```json
 {
@@ -102,15 +122,15 @@ c7a9909cc831   davidyoung2025/cdk:local                                         
      "runAggregatorClient": true,
      "runAggregatorClientMock": false,
 
-     "aggregatorClientHost": "44.247.2.2",
-     "aggregatorClientPort": 32783,
+     "aggregatorClientHost": "34.220.116.172",
+     "aggregatorClientPort": 60500,
 
-     "proverName": "real-prover-rc16-fork12",
+     "proverName": "real-prover-rc9-fork12",
 
      "executorServerPort": 50071,
      "hashDBServerPort": 50061,
      "hashDBURL": "local",
-     "databaseURL": "postgresql://prover_user:redacted@44.247.2.2:32770/prover_db",
+     "databaseURL": "postgresql://prover_user:redacted@34.220.116.172:60600/prover_db",
 
      "keccakScriptFile": "config/scripts/keccak_script.json",
      "storageRomFile": "config/scripts/storage_sm_rom.json",
@@ -128,7 +148,9 @@ c7a9909cc831   davidyoung2025/cdk:local                                         
      "requestsPersistence": 3600,
 
      "saveRequestToFile": true,
+     "saveInputToFile": true,
      "saveResponseToFile": true,
+
      "saveOutputToFile": true,
      "saveProofToFile": true,
      "outputPath": "output",
@@ -136,23 +158,44 @@ c7a9909cc831   davidyoung2025/cdk:local                                         
 
      "mapConstPolsFile": true,
      "mapConstantsTreeFile": true,
-     "maxExecutorThreads": 4,
-     "maxProverThreads": 1
+     "maxExecutorThreads": 4,    
+     "maxProverThreads": 1,
+
+     "aggregatorClientWatchdogTimeout": 3600000000
 }
 ```
+### 下载多项式
+官方给的方式是运行 `./tools/download_archive.sh`; 但这会替换 repo 自带 config；我们直接把他放到一个独立的目录中即可
+
+下载
+```sh
+ARCHIVE_NAME="v8.0.0-rc.9-fork.12"
+ARCHIVE_EXTENSION=".tgz"
+ARCHIVE_URL="https://storage.googleapis.com/zkevm/zkproverc/${ARCHIVE_NAME}${ARCHIVE_EXTENSION}
+wget -c ${ARCHIVE_URL}
+```
+
+解压
+```sh
+tar -xzvf ${ARCHIVE_NAME}${ARCHIVE_EXTENSION}
+```
+
+我们实际用到的就是 v8.0.0-rc.9-fork.12/config 文件夹
 
 ### 启动容器
 
 ```sh
 docker rm real-prover 2>/dev/null; docker run -d \
   --name real-prover \
-  -v /root/polygon-suite/zkevm-prover/config.json:/usr/src/app/config.json \
-  -v /root/polygon-suite/zkevm-prover/v8.0.0-rc.9-fork.12/config:/usr/src/app/config \
-  hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12 \
-  zkProver -c /usr/src/app/config.json
+  -v /data/real-prover-config.json:/usr/src/app/config/config.json \
+  -v /data/v8.0.0-rc.9-fork.12/config:/usr/src/app/config \
+  zkprover:latest \
+  zkProver -c /usr/src/app/config/config.json
 ```
 
-启动到生成证明大约 1～3 小时，在 `outputPath` 下可以看到 grpc 的通信数据。
+阿里云机器启动到生成证明不到 小时，在 `outputPath` 下可以看到 grpc 的通信数据。
+
+而 aws 启动到生成证明要 1～3 小时
 
 ---
 

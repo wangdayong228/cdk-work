@@ -27,7 +27,7 @@ args:
   use_dynamic_ports: true
   zkevm_bridge_ui_image: zkevm-bridge-ui:0006445 # local build image, 编译方式参看 docker/README.md
   cdk_node_image: davidyoung2025/cdk:local # local build image with proverSR debug logging
-  cdk_erigon_node_image: hermeznetwork/cdk-erigon:local # 使用本机最新编译镜像
+  cdk_erigon_node_image: davidyoung2025/cdk-erigon:local # 使用本机最新编译镜像
   # 区分每条链
   deployment_suffix: '-1'
   zkevm_rollup_chain_id: $L2_CHAIN_ID
